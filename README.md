@@ -50,11 +50,9 @@ you could have fun sharing our ideas and experimenting yours.
 A rewrite of RefPerSys in C was attempted on [refpersys-in-c](https://github.com/RefPerSys/refpersys-in-c).
 
 We considered previously to use the garbage collector from [Ravenbrook
-MPS](https://www.ravenbrook.com/project/mps/). Since that project is
-now obsolete, we gave up that idea.
+MPS](https://github.com/Ravenbrook/mps).
 
-**Don't expect RefPerSys to be a realistic project.** It is not (and
-certainly not before 2023).
+**Don't expect RefPerSys to be a mature project.** It is not in Feb 2024.
 
 Some draft design ideas are written in the [RefPerSys design
 draft](http://starynkevitch.net/Basile/refpersys-design.pdf) which is
@@ -141,6 +139,7 @@ copyrighted by the RefPerSys team, currently made of:
 		near Paris, France. So usual timezone `TZ=MEST`
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
+ *      Niklaus Rozencrantz in Sweden.
 
 Some files might be "borrowed" from other similar GPLv3+ licensed
 projects (notably from [Bismon](http://github.com/bstarynk/bismon)...)
@@ -272,24 +271,10 @@ Some C++ code is important since shared between RefPerSys and the
 mid-september 2023.  It uses GNU libunistring and is shared (in file
 `jsonrpsfltk.cc` of the `guifltk-refpersys`
 
-### compiling FLTK with DWARF debug information
 
-[RefPerSys](http://refpersys.org/) was using (e.g. in its commit
-[843a6f0ddf1c22](https://github.com/RefPerSys/RefPerSys/commit/843a6f0ddf1c22149560f8d5a145638d78eda187)...)
-the [FLTK](https://fltk.org/) graphical user interface toolkit
-(e.g. FLTK version
-[1.3.8](https://www.fltk.org/pub/fltk/1.3.8/fltk-1.3.8-source.tar.bz2)
-or [newer](https://github.com/fltk/fltk)...).  That toolkit should be
-compiled with both debug information and optimization, by [configuring
-it](https://groups.google.com/g/fltkgeneral/c/QA70GfnWYvE/m/iIvJGb1uBwAJ)
-with `./configure --enable-debug --with-optim="-O2"`
+### Related files
 
-### The `guifltk-refpersys` graphical user interface
-
-Near september 2023, a separate [FLTK](https://fltk.org/) based
-graphical user interface is being developed. See
-[guifltk-refpersys](https://github.com/RefPerSys/guifltk-refpersys)
-for its code.
+See also some files from [misc-basile](https://github.com/bstarynk/misc-basile)
 
 ### Build instructions
 
