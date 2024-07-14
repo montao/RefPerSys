@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2023 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -38,6 +38,9 @@ const char rps_objects_gitid[]= RPS_GITID;
 
 extern "C" const char rps_objects_date[];
 const char rps_objects_date[]= __DATE__;
+
+extern "C" const char rps_objects_shortgitid[];
+const char rps_objects_shortgitid[]= RPS_SHORTGITID;
 
 
 std::unordered_map<Rps_Id,Rps_ObjectZone*,Rps_Id::Hasher> Rps_ObjectZone::ob_idmap_(50777);
@@ -138,9 +141,9 @@ Rps_ObjectRef::as_string(void) const
       if (!clana.empty())
         return std::string{"∋" /*U+220B CONTAINS AS MEMBER*/} + clana;
     }
-  /** Up to commit 44bdcf1b86b983 dated Jul 16, 2023 we incorrectly
-      used the _4FBkYDlynyC02QtkfG "name"∈named_attribute instead of
-      the _1EBVGSfW2m200z18rx name∈named_attribute **/
+  /** Up to commit 44bdcf1b86b983 dated Jul 16, 2023 we did
+   ** incorrectly used the _4FBkYDlynyC02QtkfG "name"∈named_attribute
+   ** instead of the _1EBVGSfW2m200z18rx name∈named_attribute **/
   else if (const Rps_Value namval
            = _optr->get_physical_attr(RPS_ROOT_OB(_1EBVGSfW2m200z18rx)) /*name∈named_attribute*/)
     {
@@ -956,6 +959,24 @@ Rps_ObjectZone::component_at ([[maybe_unused]] Rps_CallFrame*stkf, int rk, bool 
     return nullptr;
   throw std::range_error("Rps_ObjectZone::component_at index out of range");
 } // end Rps_ObjectZone::component_at
+
+Rps_Value
+Rps_ObjectZone::replace_component_at ([[maybe_unused]] Rps_CallFrame*stkf, int rk,  Rps_Value comp0, bool dontfail)
+{
+  std::lock_guard<std::recursive_mutex> gu(ob_mtx);
+  unsigned nbcomp = ob_comps.size();
+  if (rk<0) rk += nbcomp;
+  if (rk>=0 && rk<(int)nbcomp)
+    {
+      Rps_Value oldv =  ob_comps[rk];
+      ob_comps[rk] = comp0;
+      touch_now();
+      return oldv;
+    }
+  if (dontfail)
+    throw std::range_error("Rps_ObjectZone::component_at index out of range");
+  return nullptr;
+} // end Rps_ObjectZone::replace_component_at
 
 void
 Rps_ObjectZone::append_comp1(Rps_Value comp0)

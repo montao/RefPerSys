@@ -52,7 +52,7 @@ A rewrite of RefPerSys in C was attempted on [refpersys-in-c](https://github.com
 We considered previously to use the garbage collector from [Ravenbrook
 MPS](https://github.com/Ravenbrook/mps).
 
-**Don't expect RefPerSys to be a mature project.** It is not in Feb 2024.
+**Don't expect RefPerSys to be a mature project.** It is not in June 2024.
 
 Some draft design ideas are written in the [RefPerSys design
 draft](http://starynkevitch.net/Basile/refpersys-design.pdf) which is
@@ -134,12 +134,19 @@ This *research* project is
 [GPLv3+](https://www.gnu.org/licenses/gpl.html) licensed and
 copyrighted by the RefPerSys team, currently made of:
 
- *      Basile Starynkevitch <basile@starynkevitch.net>, 
+ *      Basile Starynkevitch <basile@starynkevitch.net>,
+        8 rue de la Faïencerie
+	92340 Bourg-la-Reine
+	France
         homepage http://starynkevitch.net/Basile/
 		near Paris, France. So usual timezone `TZ=MEST`
- *      Abhishek Chakravarti <abhishek@taranjali.org>
+		
+ *      Abhishek Chakravarti <ack@fifthestate.co.in>
+        Kolkata, India
+	
  *      Nimesh Neema <nimeshneema@gmail.com>
- *      Niklaus Rozencrantz in Sweden.
+ 
+ *      Niklas Rozencrantz in Stockholm, Sweden.
 
 Some files might be "borrowed" from other similar GPLv3+ licensed
 projects (notably from [Bismon](http://github.com/bstarynk/bismon)...)
@@ -230,6 +237,9 @@ they contain @RPSLIBES= that is used to link the plugin.
 
 ## Building and dependencies.
 
+A [transpiler](https://en.wikipedia.org/wiki/Source-to-source_compiler) for *RefPerSys* is being developed on https://github.com/bstarynk/misc-basile 
+files `transpiler-refpersys.{cc,hh}`
+
 The [build automation](https://en.wikipedia.org/wiki/Build_automation)
 tool used here is [GNU make](https://www.gnu.org/software/make/) since
 commit `6d56f50660c7cc41b9` (it was
@@ -278,25 +288,47 @@ See also some files from [misc-basile](https://github.com/bstarynk/misc-basile)
 
 ### Build instructions
 
+You need a recent C99 compiler e.g. `gcc` (at least  [GCC
+12](https://gcc.gnu.org/gcc-12/)). Check with `gcc --version`.
+
 You need a recent C++17 compiler such as `g++` (We use
 [GCC](http://gcc.gnu.org/) version [GCC
-10](https://gcc.gnu.org/gcc-10/)) or [GCC
-11](https://gcc.gnu.org/gcc-11/) or
+12](https://gcc.gnu.org/gcc-12/)) or [GCC
+13](https://gcc.gnu.org/gcc-13/) or [GCC
+14](https://gcc.gnu.org/gcc-14/)
 [`clang++`](http://clang.llvm.org/) version [Clang
 11](https://releases.llvm.org/download.html). Look into, and perhaps
-improve, our `Makefile`. Build using `make -j 3` or more.
+improve, our `GNUmakefile`. Check with `g++ --version`. Build using `make -j 3` or more.
  
+You need the [ninja](https://ninja-build.org/) build utility.
+
+You need the `glibmm` from GTK suite. And some `gtkmm` for some RefPerSys plugins.
+
 You also should do a  `make clean` after any `git pull`
 
-You may want to edit your `$HOME/.refpersys.mk` file to contain
-definitions of GNU `make` variables for your particular C and C++ compiler,
-like e.g.
 
-     # file ~/.refpersys.mk
-     RPS_BUILD_CC= gcc-12
-     RPS_BUILD_CXX= g++-12
+Your Unix environment should contain a `REFPERSYS_TOPDIR` shell
+variable. The author has `env REFPERSYS_TOPDIR=$HOME/RefPerSys/` and
+did `git clone` this into that `$REFPERSYS_TOPDIR`.
+
+You need a Linux `pkg-config` utility.
+
+You first need to `make config`. I recommend having the *GNU readline* library.
 
 You then build with `make -j4 refpersys && make all`
+
+
+### GUI libraries
+
+Debugging them is painful (or my code using GUI libraries) because of
+lack of DWARF debugging information in many GUI libraries (and even
+for my bugs, it is easier to have GUI libraries compiled with `-O2
+-g`).  If you are familiar with [FLTK](https://www.fltk.org/) and able
+and allowed to download its source code and configure it using
+`'./configure' 'CFLAGS=-O2 -fPIC -g -Wall -Wextra' 'CXXFLAGS=-O2 -g
+-fPIC -Wall -Wextra' '--disable-static' '--enable-shared'
+'--enable-debug' '--with-abiversion' '--with-optim=-g -O2 -fPIC'
+'--sysconfdir=/etc/local/'` please send us an email.
 
 ## Garbage collection
 

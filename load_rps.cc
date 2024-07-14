@@ -14,7 +14,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2023 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -44,6 +44,12 @@ const char rps_load_gitid[]= RPS_GITID;
 
 extern "C" const char rps_load_date[];
 const char rps_load_date[]= __DATE__;
+
+extern "C" const char rps_load_shortgitid[];
+const char rps_load_shortgitid[]= RPS_SHORTGITID;
+
+extern "C" char rps_loaded_directory[rps_path_byte_size];
+char rps_loaded_directory[rps_path_byte_size];
 
 Json::Value
 rps_load_string_to_json(const std::string&str, const char*filnam, int lineno)
@@ -106,6 +112,7 @@ public:
   void parse_manifest_file(void);
   void parse_user_manifest(const std::string&path);
   void first_pass_space(Rps_Id spacid);
+  void initialize_root_objects(void);
   void initialize_constant_objects(void);
   void second_pass_space(Rps_Id spacid);
   std::string string_of_loaded_file(const std::string& relpath);
@@ -362,6 +369,14 @@ Rps_Loader::first_pass_space(Rps_Id spacid)
                 RPS_FATAL("spacefile %s should have spaceid: '%s' but got '%s'",
                           spacepath.c_str (), spacid.to_string().c_str(),
                           prologjson["spaceid"].asString().c_str());
+              int majv = prologjson["rpsmajorversion"].asInt();
+              int minv = prologjson["rpsminorversion"].asInt();
+              if (majv != rps_get_major_version()
+                  || minv != rps_get_minor_version())
+                RPS_WARNOUT("space file " << spacepath
+                            << " was dumped by RefPerSys " << majv << "." << minv
+                            << " but is loaded by RefPerSys " << rps_get_major_version()
+                            << "." << rps_get_minor_version());
               Json::Value nbobjectsjson =  prologjson["nbobjects"];
               expectedcnt =nbobjectsjson.asInt();
             }
@@ -456,6 +471,22 @@ rps_load_add_todo(Rps_Loader*ld,const std::function<void(Rps_Loader*)>& todofun)
   RPS_ASSERT(todofun);
   ld->add_todo(todofun);
 } // end rps_load_add_todo
+
+void
+Rps_Loader::initialize_root_objects(void)
+{
+  std::lock_guard<std::recursive_mutex> gu(ld_mtx);
+#define RPS_INSTALL_ROOT_OB(Oid) do {   \
+    if (!RPS_ROOT_OB(Oid))      \
+      RPS_ROOT_OB(Oid)        \
+  = find_object_by_oid(Rps_Id(#Oid)); \
+    RPS_ASSERT(RPS_ROOT_OB(Oid));   \
+  } while(0);
+#include "generated/rps-roots.hh"
+} // end Rps_Loader::initialize_root_objects
+
+
+
 
 void
 Rps_Loader::initialize_constant_objects(void)
@@ -584,7 +615,9 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                  )
                 {
                   auto atobr =  Rps_ObjectRef(entjson["at"], this);
+                  RPS_ASSERT(atobr);
                   auto atval = Rps_Value(entjson["va"], this);
+                  RPS_ASSERT(atval);
                   obz->loader_put_attr(this, atobr, atval);
                 }
             }
@@ -685,6 +718,27 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                        << std::endl);
         }
     }
+  if (obz->is_instance_of(RPS_ROOT_OB(_3O1QUNKZ4bU02amQus) //∈rps_routine
+                         ))
+    {
+      std::lock_guard<std::recursive_mutex> gu(ld_mtx);
+      char appfunambuf[sizeof(RPS_APPLYINGFUN_PREFIX)+8+Rps_Id::nbchars];
+      memset(appfunambuf, 0, sizeof(appfunambuf));
+      char obidbuf[32];
+      memset (obidbuf, 0, sizeof(obidbuf));
+      obz->oid().to_cbuf24(obidbuf);
+      strcpy(appfunambuf, RPS_APPLYINGFUN_PREFIX);
+      strcat(appfunambuf+strlen(RPS_APPLYINGFUN_PREFIX), obidbuf);
+      RPS_ASSERT(strlen(appfunambuf)<sizeof(appfunambuf)-4);
+      void*funad = dlsym(rps_proghdl, appfunambuf);
+      if (!funad)
+        RPS_WARNOUT("cannot dlsym " << appfunambuf << " for applying function of objid:" <<  objid
+                    << Rps_ObjectRef(obz)
+                    << " lineno:" << lineno << ", spacid:" << spacid
+                    << ":: " << dlerror());
+      else
+        obz->loader_put_applyingfunction(this, reinterpret_cast<rps_applyingfun_t*>(funad));
+    }
   RPS_DEBUG_LOG(LOAD, "parse_json_buffer_second_pass end objid=" << objid << " #" << count
                 << std::endl);
 } // end of Rps_Loader::parse_json_buffer_second_pass
@@ -775,13 +829,18 @@ Rps_Loader::load_all_state_files(void)
   RPS_DEBUG_LOG(LOAD, "Rps_Loader::load_all_state_files start this@" << (void*)this
                 << std::endl << RPS_FULL_BACKTRACE_HERE(0, "RpsLoader::load_all_state_files"));
   int spacecnt1 = 0, spacecnt2 = 0;
+  Rps_Id initialspaceid("_8J6vNYtP5E800eCr5q"); //"initial_space"∈space
+  first_pass_space(initialspaceid);
+  spacecnt1++;
+  initialize_root_objects();
   int todocount = 0;
   for (Rps_Id spacid: ld_spaceset)
     {
-      first_pass_space(spacid);
+      if (spacid != initialspaceid)
+        first_pass_space(spacid);
       spacecnt1++;
     }
-  RPS_NOPRINTOUT("loaded " << spacecnt1 << " space files in first pass");
+  RPS_INFORMOUT("loaded " << spacecnt1 << " space files in first pass");
   initialize_constant_objects();
   /// conceptually, the second pass might be done in parallel
   /// (multi-threaded, with different threads working on different
@@ -847,6 +906,7 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
   std::int64_t i=0;
   std::string str = "";
   std::size_t siz=0;
+  std::size_t subsiz=0;
   Json::Value jcomp;
   Json::Value jvtype;
   if (jv.isInt64())
@@ -870,7 +930,7 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
   else if (jv.isString())
     {
       str = jv.asString();
-      if (str.size() == Rps_Id::nbchars && str[0] == '_'
+      if (str.size() == Rps_Id::nbchars && str[0] == '_' && isalnum(str[1])
           && std::all_of(str.begin()+1, str.end(),
                          [](char c)
       {
@@ -878,6 +938,7 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
         }))
       {
         *this = Rps_ObjectValue(Rps_ObjectRef(jv, ld));
+        RPS_ASSERT(*this);
         return;
       }
       *this = Rps_StringValue(str);
@@ -894,12 +955,14 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
            && ((jvtype=jv["vtype"]).isString())
            && !(str=jvtype.asString()).empty())
     {
+      siz = jv.size();
+      RPS_POSSIBLE_BREAKPOINT();
       if (str == "set" && siz==2 && jv.isMember("elem")
-          && (jcomp=jv["elem"]).isArray()
-          && (siz=jcomp.size()))
+          && (jcomp=jv["elem"]).isArray())
         {
+          subsiz = jcomp.size();
           std::set<Rps_ObjectRef> setobr;
-          for (int ix=0; ix<(int)siz; ix++)
+          for (int ix=0; ix<(int)subsiz; ix++)
             {
               auto obrelem = Rps_ObjectRef(jcomp[ix], ld);
               if (obrelem)
@@ -909,11 +972,11 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
           return;
         }
       else if (str == "tuple" && siz==2 && jv.isMember("elem")
-               && (jcomp=jv["comp"]).isArray()
-               && (siz=jcomp.size()))
+               && (jcomp=jv["comp"]).isArray())
         {
+          subsiz = jcomp.size();
           std::vector<Rps_ObjectRef> vecobr;
-          vecobr.reserve(siz);
+          vecobr.reserve(subsiz);
           for (int ix=0; ix<(int)siz; ix++)
             {
               auto obrcomp = Rps_ObjectRef(jcomp[ix], ld);
@@ -944,10 +1007,10 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
           RPS_NOPRINTOUT("closure funobr=" << funobr);
           if (jenv.isArray())
             {
-              auto siz = jenv.size();
+              subsiz = jenv.size();
               std::vector<Rps_Value> vecenv;
-              vecenv.reserve(siz+1);
-              for (int ix=0; ix <(int)siz; ix++)
+              vecenv.reserve(subsiz+1);
+              for (int ix=0; ix <(int)subsiz; ix++)
                 {
                   auto curval = Rps_Value(jenv[ix], ld);
                   vecenv.push_back(curval);
@@ -967,10 +1030,10 @@ Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)
               return;
             }
           else
-            RPS_WARNOUT("Rps_Value::Rps_Value bad closure funobr=" << funobr);
+            RPS_WARNOUT("Rps_Value::Rps_Value bad closure funobr=" << funobr << " jv=" << jv);
         }
       else
-        RPS_WARNOUT("strange Rps_Value::Rps_Value str=" << str);
+        RPS_WARNOUT("strange Rps_Value::Rps_Value siz=" << siz << " str=" << str << " jv=" << jv);
     }
 #warning Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld) unimplemented
   RPS_WARNOUT("unimplemented Rps_Value::Rps_Value(const Json::Value &jv, Rps_Loader*ld)" << std::endl
@@ -1184,6 +1247,15 @@ Rps_Loader::parse_manifest_file(void)
               "%s",
               manifpath.c_str (), RPS_MANIFEST_FORMAT, RPS_PREVIOUS_MANIFEST_FORMAT,
               manifjson["format"].toStyledString().c_str());
+  int majv = manifjson["rpsmajorversion"].asInt();
+  int minv = manifjson["rpsminorversion"].asInt();
+  if (majv != rps_get_major_version() || minv != rps_get_minor_version())
+    {
+      RPS_WARNOUT("manifest path " << manifpath.c_str()
+                  << " dumped by RefPerSys " << majv << "." << minv
+                  << " but loaded by "
+                  << rps_get_major_version() << "." << rps_get_minor_version());
+    };
   /// parse spaceset
   {
     auto spsetjson = manifjson["spaceset"];
@@ -1403,16 +1475,16 @@ void Rps_Loader::load_install_roots(void)
   int nbroots=0;
   {
     std::lock_guard<std::recursive_mutex> gu(ld_mtx);
-#define RPS_INSTALL_ROOT_OB(Oid)    {     \
-      const char *end##Oid = nullptr;     \
-      bool ok##Oid = false;       \
+#define RPS_INSTALL_ROOT_OB(Oid)    {                   \
+      const char *end##Oid = nullptr;                   \
+      bool ok##Oid = false;                             \
       auto id##Oid = Rps_Id(#Oid, &end##Oid, &ok##Oid); \
-      RPS_ASSERT(end##Oid && *end##Oid == (char)0); \
-      RPS_ASSERT(id##Oid && id##Oid.valid());   \
-      RPS_ROOT_OB(Oid) = find_object_by_oid(id##Oid); \
-      if (!RPS_ROOT_OB(Oid))        \
-  RPS_WARN("failed to install root " #Oid); \
-      nbroots++;          \
+      RPS_ASSERT(end##Oid && *end##Oid == (char)0);     \
+      RPS_ASSERT(id##Oid && id##Oid.valid());           \
+      RPS_ROOT_OB(Oid) = find_object_by_oid(id##Oid);   \
+      if (!RPS_ROOT_OB(Oid))                            \
+  RPS_WARN("failed to install root " #Oid);             \
+      nbroots++;                                        \
     }
   };
 #include "generated/rps-roots.hh"
@@ -1425,23 +1497,25 @@ void Rps_Loader::load_install_roots(void)
   int nbsymb=0;
   {
     std::lock_guard<std::recursive_mutex> gu(ld_mtx);
-#define RPS_INSTALL_NAMED_ROOT_OB(Oid,Name)    {  \
-      const char *end##Oid##Name = nullptr;   \
-      bool ok##Oid##Name = false;     \
-      auto id##Oid##Name = Rps_Id(#Oid,     \
-          &end##Oid##Name,  \
-          &ok##Oid##Name);  \
-      RPS_ASSERT(end##Oid##Name       \
-     && *end##Oid##Name == (char)0);  \
-      RPS_ASSERT(id##Oid##Name        \
-     && id##Oid##Name.valid());   \
-      RPS_SYMB_OB(Name) =       \
-  find_object_by_oid(id##Oid##Name);    \
-      if (!RPS_SYMB_OB(Name))       \
-  RPS_WARN("failed to install symbol "    \
-     #Oid " named " #Name);     \
-      nbsymb++;           \
+    //
+#define RPS_INSTALL_NAMED_ROOT_OB(Oid,Name)    {        \
+      const char *end##Oid##Name = nullptr;             \
+      bool ok##Oid##Name = false;                       \
+      auto id##Oid##Name = Rps_Id(#Oid,                 \
+          &end##Oid##Name,                              \
+          &ok##Oid##Name);                              \
+      RPS_ASSERT(end##Oid##Name                         \
+     && *end##Oid##Name == (char)0);                    \
+      RPS_ASSERT(id##Oid##Name                          \
+     && id##Oid##Name.valid());                         \
+      RPS_SYMB_OB(Name) =                               \
+  find_object_by_oid(id##Oid##Name);                    \
+      if (!RPS_SYMB_OB(Name))                           \
+  RPS_WARN("failed to install symbol "                  \
+     #Oid " named " #Name);                             \
+      nbsymb++;                                         \
     };
+    //
 #include "generated/rps-names.hh"
     RPS_ASSERT(nbsymb == RPS_NB_NAMED_ROOT_OB);
   }
@@ -1513,6 +1587,7 @@ void rps_load_from (const std::string& dirpath)
   snprintf(cputbuf, sizeof(cputbuf), "%.3f", cput);
   snprintf(realmicrobuf, sizeof(realmicrobuf), "%.3f", (realt*1.0e6)/nbloaded);
   snprintf(cpumicrobuf, sizeof(cpumicrobuf), "%.3f", (cput*1.0e6)/nbloaded);
+  strncpy(rps_loaded_directory, dirpath.c_str(), sizeof(rps_loaded_directory)-1);
   RPS_INFORMOUT("rps_load_from completed" << std::endl
                 << "... from directory " << dirpath
                 << " with RefPerSys built " << rps_timestamp << std::endl

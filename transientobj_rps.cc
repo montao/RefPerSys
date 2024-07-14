@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2023 The Reflective Persistent System Team
+ *      © Copyright 2023 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -39,7 +39,8 @@ const char rps_transientobj_gitid[]= RPS_GITID;
 extern "C" const char rps_transientobj_date[];
 const char rps_transientobj_date[]= __DATE__;
 
-
+extern "C" const char rps_transientobj_shortgitid[];
+const char rps_transientobj_shortgitid[]= RPS_SHORTGITID;
 
 ////////////////////////////////////////////////////////////////
 ////// trensient unix process payload
@@ -274,7 +275,7 @@ Rps_PayloadUnixProcess::put_output_closure(Rps_ClosureValue closv)
   if (!closv || !closv.is_closure()) return;
   std::lock_guard<std::recursive_mutex> gu(*owner()->objmtxptr());
   _unixproc_outputclos = closv;
-} // end Rps_PayloadUnixProcess::put_input_closure
+} // end Rps_PayloadUnixProcess::put_output_closure
 
 
 
@@ -394,6 +395,12 @@ Rps_PayloadUnixProcess::do_on_active_process_queue(std::function<void(Rps_Object
     {
       Rps_ObjectRef obown = paylup->owner();
       std::lock_guard<std::recursive_mutex> gu(*obown->objmtxptr());
+      RPS_DEBUG_LOG(REPL,
+                    "Rps_PayloadUnixProcess::do_on_active_process_queue obown="
+                    << obown << std::endl
+                    << Rps_ShowCallFrame(callframe)
+                    << std::endl
+                    <<  RPS_FULL_BACKTRACE_HERE(1,"Rps_PayloadUnixProcess::do_on_active_process_queue"));
       fun(obown,callframe,client_data);
     }
 } // end Rps_PayloadUnixProcess::do_on_active_process_queue

@@ -1,4 +1,33 @@
 #!/bin/bash
+## SPDX-License-Identifier: GPL-3.0-or-later
+##
+## License:
+##
+##    This GNU bash script do-generate-timestamp.sh is free software:
+##    you can redistribute it and/or modify it under the terms of the
+##    GNU General Public License as published by the Free Software
+##    Foundation, either version 3 of the License, or (at your option)
+##    any later version.
+##
+##    This program is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+##
+##    You should have received a copy of the GNU General Public License
+##    along with this program.  If not, see <http://www.gnu.org/licenses/>
+##
+##      © Copyright 2019 - 2024 The Reflective Persistent System Team
+##      team@refpersys.org
+##
+##    This internal script generates some C file containing timestamp
+##    related constants for Linux related to the RefPerSys inference
+##    engine free software project on refpersys.org.  It should be
+##    invoked by GNU make only.
+##    
+##
+##
+printf "/// invocation: %s %s in %s\n" $0 "$*" "$(realpath $(pwd))"
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 export LC_TIME=en_US.UTF-8
@@ -50,6 +79,10 @@ printf "const char rps_gnu_make[]=\"%s\";\n" $(/bin/which gmake)
 
 printf "const char rps_gnu_make_version[]=\"%s\";\n" "$(gmake --version | /bin/head -1)"
 
+printf "const char rps_gnu_bison[]=\"%s\";\n" $(/bin/which bison)
+
+printf "const char rps_gnu_bison_version[]=\"%s\";\n" "$(bison --version | /bin/head -1)"
+
 printf "const char rps_gui_script_executable[]=\"%s\";\n" $(realpath gui-script-refpersys.sh)
 
 printf "const char rps_building_user_name[]=\"%s\";\n" "$(git config user.name)"
@@ -71,6 +104,18 @@ printf "const char rps_plugin_builder_script[]=\"%s\";\n" $(realpath ./build-plu
 printf "const char rps_cxx_compiler_realpath[]=\"%s\";\n" $(realpath $CXX)
 
 printf "const char rps_cxx_compiler_version[]=\"%s\";\n" "$($CXX --version | /bin/head -1)"
+
+printf "const char rps_cxx_compiler_flags[]=\"%s\";\n" "$CXXFLAGS"
+
+printf "const char rps_gpp_preprocessor_command[]=\"%s\";\n" $GPP
+
+printf "const char rps_gpp_preprocessor_realpath[]=\"%s\";\n" $(realpath $GPP)
+
+printf "const char rps_gpp_preprocessor_version[]=\"%s\";\n" "$($GPP --version | /bin/head -1)"
+
+printf "const char rps_ninja_builder[]=\"%s\";\n" "$REFPERSYS_NINJA"
+
+printf "const char rps_ninja_version[]=\"%s\";\n" "$($REFPERSYS_NINJA --version)"
 
 printf "/// see also GNUmakefile in %s for refpersys.org;\n" $PWD
 

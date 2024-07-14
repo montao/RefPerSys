@@ -37,7 +37,7 @@
 #include <sys/utsname.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <signal.h>
+#include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include <time.h>
@@ -45,7 +45,6 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <dlfcn.h>
 
 #ifndef WITHOUT_READLINE
 #include "readline/readline.h"
@@ -60,10 +59,36 @@
 #endif
 
 #ifndef GIT_ID
-#error GIT_ID should be defined at compilation time
+// fictional GIT_ID could be "b32bcbf69070+"
+#error GIT_ID should be defined thru compilation command "short git id"
 #endif
 
+#ifndef OPERSYS
+// usually OPERSYS would be "GNU_Linux" given by:
+/////  /bin/uname -o | /bin/sed 1s/[^a-zA-Z0-9_]/_/g
+#error OPERSYS should be defined thru compilation command "operating system"
+#endif
+
+#ifndef ARCH
+// example ARCH could be "aarch64" or "x86_64" given by /bin/uname -m
+#error ARCH should be defined thru compilation command "machine architecture"
+#endif
+
+#ifndef HOST
+// possible HOST might be "refpersys.com" given by /bin/hostname -f
+#error HOST should be defined thru compilation command "hostname"
+#endif
+
+const char rpsconf_gitid[] = GIT_ID;
+const char rpsconf_opersys[] = OPERSYS;
+const char rpsconf_arch[] = ARCH;
+const char rpsconf_host[] = HOST;
+
+#define RPS_CONF_OK 0
+#define RPS_CONF_FAIL -1
+
 const char *prog_name;
+bool rps_conf_verbose = 1;	/* will be set later with command line flag */
 bool failed;
 
 //// working directory
@@ -86,6 +111,22 @@ int linker_argcount;
 const char *c_compiler;
 const char *cpp_compiler;
 
+/* strdup-ed string of the person building RefPerSys (or null): */
+const char *builder_person;
+
+/* strdup-ed string of the email of the person building RefPerSys (or null): */
+const char *builder_email;
+
+/* absolute path to fltk-config utility */
+const char *fltk_config;
+
+
+/* absolute path to Miller&Auroux Generic preprocessor */
+const char *gpp;
+
+/* absolute path to ninja builder (see ninja-build.org) */
+const char *ninja_builder;
+
 #ifndef MAX_REMOVED_FILES
 #define MAX_REMOVED_FILES 4096
 #endif
@@ -103,12 +144,29 @@ char *temporary_binary_file (const char *prefix, const char *suffix,
 /// emit the configure-refperys.mk file to be included in GNUmakefile 
 void emit_configure_refpersys_mk (void);
 
-void try_c_compiler (const char *cc);
-void try_then_set_cxx_compiler (const char *cxx);
-void should_remove_file (const char *path, int lineno);
+static void
+rps_conf_diag__ (const char *, int, const char *, ...)
+#ifdef __GNUC__
+// see gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html
+  __attribute__((format (printf, 3, 4)))
+#endif /*__GNUC__*/
+  ;
+     static int rps_conf_cc_set (const char *);
+     static void rps_conf_cc_test (const char *);
 
-char *
-temporary_textual_file (const char *prefix, const char *suffix, int lineno)
+     void try_then_set_cxx_compiler (const char *cxx);
+     void should_remove_file (const char *path, int lineno);
+
+
+/* Wrapper macro around rps_conf_diag__() */
+#define rps_conf_diag(msg, ...) \
+	rps_conf_diag__(__FILE__, __LINE__, msg, ##__VA_ARGS__)
+
+
+
+/// return a malloced path to a temporary textual file
+     char *temporary_textual_file (const char *prefix, const char *suffix,
+				   int lineno)
 {
   char buf[256];
   memset (buf, 0, sizeof (buf));
@@ -191,24 +249,63 @@ temporary_binary_file (const char *prefix, const char *suffix, int lineno)
 char *
 my_readline (const char *prompt)
 {
+  bool again = false;
 #ifndef WITHOUT_READLINE
-  return readline (prompt);
-#else
-  char linebuf[512];
-  memset (linebuf, 0, linebuf);
-  puts (prompt);
-  fflush (stdout);
-  char *p = fgets (linebuf, sizeof (linebuf), stdin);
-  if (!p)
-    return NULL;
-  linebuf[sizeof (linebuf) - 1] = (char) 0;
-  char *res = strdup (linebuf);
-  if (!res)
+  do
     {
-      perror ("my_readline");
-      failed = true;
-      exit (EXIT_FAILURE);
-    };
+      again = false;
+      char *lin = readline (prompt);
+      if (lin && isspace (lin[strlen (lin) - 1]))
+	lin[strlen (lin) - 1] = (char) 0;
+      if (lin && lin[0] == '!')
+	{
+	  printf ("*running %s\n", lin + 1);
+	  fflush (NULL);
+	  int cod = system (lin + 1);
+	  fflush (NULL);
+	  if (cod)
+	    printf ("*failed to run %s -> %d\n", lin + 1, cod);
+	  again = true;
+	  continue;
+	}
+      return lin;
+    }
+  while (again);
+  return NULL;
+#else
+  do
+    {
+      char linebuf[512];
+      memset (linebuf, 0, linebuf);
+      again = false;
+      puts (prompt);
+      fflush (stdout);
+      char *p = fgets (linebuf, sizeof (linebuf), stdin);
+      if (!p)
+	return NULL;
+      linebuf[sizeof (linebuf) - 1] = (char) 0;
+      if (isspace (p[strlen (p) - 1]))
+	p[strlen (p) - 1] = (char) 0;
+      if (linbuf[0] == '!')
+	{
+	  printf ("*running %s\n", linbuf + 1);
+	  fflush (nullptr);
+	  int cod = system (linbuf + 1);
+	  fflush (nullptr);
+	  if (cod)
+	    printf ("*failed to run %s -> %d\n", linbuf + 1, cod);
+	  again = true;
+	  continue;
+	}
+      char *res = strdup (linebuf);
+      if (!res)
+	{
+	  perror ("my_readline");
+	  failed = true;
+	  exit (EXIT_FAILURE);
+	};
+    }
+  while again;
   return res;
 #endif // WITHOUT_READLINE
 }				// end my_readline
@@ -229,122 +326,7 @@ should_remove_file (const char *path, int lineno)
   files_to_remove_at_exit[removedfiles_count++] = path;
 }				/* end should_remove_file */
 
-void
-try_compile_run_hello_world_in_c (const char *cc)
-{
-  char *helloworldsrc = NULL;
-  char helloworldbin[128];
-  memset (helloworldbin, 0, sizeof (helloworldbin));
-  helloworldsrc = temporary_textual_file ("tmp_helloworld_", ".c", __LINE__);
-  FILE *hwf = fopen (helloworldsrc, "w");
-  if (!hwf)
-    {
-      fprintf (stderr,
-	       "%s failed to create temporary hello world C %s (%m)\n",
-	       prog_name, helloworldsrc);
-    }
-  fprintf (hwf, "/// temporary hello world C file %s\n", helloworldsrc);
-  fprintf (hwf, "#include <stdio.h>\n");
-  fprintf (hwf, "void say_hello(const char*c) {\n");
-  fprintf (hwf, " printf(\"hello from %%s in %%s:%%d\\n\",\n");
-  fprintf (hwf, "        c, __FILE__, __LINE__);\n");
-  fprintf (hwf, "} //end say_hello\n");
-  fprintf (hwf, "\n\n");
-  fprintf (hwf, "int main(int argc,char**argv) { say_hello(argv[0]); }\n");
-  fclose (hwf);
-  snprintf (helloworldbin, sizeof (helloworldbin), "./%s",
-	    basename (helloworldsrc));
-  char *lastdot = strrchr (helloworldbin, '.');
-  if (lastdot)
-    strcpy (lastdot, ".bin");
-  else
-    strcat (helloworldbin, ".bin");
-  assert (lastdot);
-  {
-    char helloworldcompile[512];
-    memset (helloworldcompile, 0, sizeof (helloworldcompile));
-    snprintf (helloworldcompile, sizeof (helloworldcompile),
-	      "%s -Wall -O %s -o %s", cc, helloworldsrc, helloworldbin);
-    printf ("trying %s\n", helloworldcompile);
-    fflush (NULL);
-    int e = system (helloworldcompile);
-    if (e)
-      {
-	fprintf (stderr,
-		 "%s failed to compile hello world in C : %s exited %d\n",
-		 prog_name, helloworldcompile, e);
-	failed = true;
-	exit (EXIT_FAILURE);
-      };
-    should_remove_file (helloworldsrc, __LINE__);
-    should_remove_file (helloworldbin, __LINE__);
-    printf ("popen-eing %s\n", helloworldbin);
-    fflush (NULL);
-    FILE *pf = popen (helloworldbin, "r");
-    if (!pf)
-      {
-	fprintf (stderr, "%s failed to popen hello world in C %s (%m)\n",
-		 prog_name, helloworldbin);
-	failed = true;
-	exit (EXIT_FAILURE);
-      };
-    bool gothello = false;
-    int nblin = 0;
-    do
-      {
-	char hwline[128];
-	memset (hwline, 0, sizeof (hwline));
-	if (!fgets (hwline, sizeof (hwline), pf))
-	  break;
-	nblin++;
-	if (strstr (hwline, "hello"))
-	  gothello = true;
-      }
-    while (!feof (pf));
-    if (!gothello)
-      {
-	fprintf (stderr,
-		 "%s popen %s without hello but read %d lines from popen [%s:%d]\n",
-		 prog_name, helloworldbin, nblin, __FILE__, __LINE__ - 1);
-	failed = true;
-	exit (EXIT_FAILURE);
-      }
-    int ehw = pclose (pf);
-    if (ehw)
-      {
-	fprintf (stderr, "%s bad pclose %s (%d)\n",
-		 prog_name, helloworldbin, ehw);
-	failed = true;
-	exit (EXIT_FAILURE);
-      };
-    printf ("%s: tested hello world C compilation and run [%s:%d]\n",
-	    prog_name, __FILE__, __LINE__);
-  }
-}				/* end try_compile_run_hello_world_in_c */
 
-
-void
-try_then_set_c_compiler (const char *cc)
-{
-  if (cc[0] != '/')
-    {
-      fprintf (stderr,
-	       "%s given non-absolute path for C compiler %s [%s:%d]\n",
-	       prog_name, cc, __FILE__, __LINE__);
-      failed = true;
-      exit (EXIT_FAILURE);
-    };
-  if (access (cc, F_OK | X_OK))
-    {
-      fprintf (stderr,
-	       "%s given non-executable path for C compiler %s [%s:%d]\n",
-	       prog_name, cc, __FILE__, __LINE__);
-      failed = true;
-      exit (EXIT_FAILURE);
-    }
-  try_compile_run_hello_world_in_c (cc);
-  c_compiler = cc;
-}				/* end try_then_set_c_compiler */
 
 void
 test_cxx_compiler (const char *cxx)
@@ -356,8 +338,10 @@ test_cxx_compiler (const char *cxx)
   char *maincxxsrc = NULL;
   char showvectobj[128];
   char maincxxobj[128];
+  errno = 0;
   showvectsrc = temporary_textual_file ("tmp_showvect", ".cxx", __LINE__);
   maincxxsrc = temporary_textual_file ("tmp_maincxx", ".cxx", __LINE__);
+  errno = 0;
   /// write the show vector C++ file
   {
     FILE *svf = fopen (showvectsrc, "w");
@@ -538,7 +522,7 @@ test_cxx_compiler (const char *cxx)
       if (!gothello || !gotfilename)
 	{
 	  fprintf (stderr,
-		   "%s no hello or file nnme from C++ test popen %s [%s:%d]\n",
+		   "%s no hello or file name from C++ test popen %s [%s:%d]\n",
 		   prog_name, cmdbuf, __FILE__, __LINE__ - 1);
 	  failed = true;
 	  exit (EXIT_FAILURE);
@@ -547,21 +531,22 @@ test_cxx_compiler (const char *cxx)
   }
 }				/* end test_cxx_compiler */
 
+
 void
 try_then_set_cxx_compiler (const char *cxx)
 {
   if (cxx[0] != '/')
     {
       fprintf (stderr,
-	       "%s given non-absolute path for C++ compiler %s [%s:%d]\n",
+	       "%s given non-absolute path for C++ compiler '%s' [%s:%d]\n",
 	       prog_name, cxx, __FILE__, __LINE__);
       failed = true;
       exit (EXIT_FAILURE);
     };
-  if (access (cxx, F_OK | X_OK))
+  if (access (cxx, X_OK))
     {
       fprintf (stderr,
-	       "%s given non-executable path for C++ compiler %s [%s:%d]\n",
+	       "%s given non-executable path for C++ compiler '%s' [%s:%d]\n",
 	       prog_name, cxx, __FILE__, __LINE__);
       failed = true;
       exit (EXIT_FAILURE);
@@ -569,6 +554,159 @@ try_then_set_cxx_compiler (const char *cxx)
   test_cxx_compiler (cxx);
   cpp_compiler = cxx;
 }				/* end try_then_set_cxx_compiler */
+
+
+void
+try_then_set_fltkconfig (const char *fc)
+{
+  FILE *pipf = NULL;
+  char fcflags[2048];
+  char fldflags[1024];
+  char cmdbuf[sizeof (fcflags) + sizeof (fldflags) + 256];
+  memset (cmdbuf, 0, sizeof (cmdbuf));
+  memset (fcflags, 0, sizeof (fcflags));
+  memset (fldflags, 0, sizeof (fldflags));
+  assert (fc);
+  if (strlen (fc) > sizeof (cmdbuf) - 16)
+    {
+      fprintf (stderr, "%s: too long fltk-config path %s (max is %d bytes)\n",
+	       prog_name, fc, (int) sizeof (cmdbuf) - 16);
+      failed = true;
+      exit (EXIT_FAILURE);
+    };
+  if (access (fc, R_OK | X_OK))
+    {
+      fprintf (stderr,
+	       "%s: cannot access FLTK configurator %s (%s) [%s:%d]\n",
+	       prog_name, fc, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  /// run fltk-config -g --cflags
+  memset (cmdbuf, 0, sizeof (cmdbuf));
+  snprintf (cmdbuf, sizeof (cmdbuf), "%s -g --cflags", fc);
+  printf ("%s running %s [%s:%d]\n", prog_name, cmdbuf, __FILE__, __LINE__);
+  fflush (NULL);
+  pipf = popen (cmdbuf, "r");
+  if (!pipf)
+    {
+      fprintf (stderr, "%s: failed to popen %s (%s) [%s:%d]\n",
+	       prog_name, cmdbuf, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  if (!fgets (fcflags, sizeof (fcflags), pipf))
+    {
+      fprintf (stderr, "%s: failed to get cflags using %s (%s) [%s:%d]\n",
+	       prog_name, cmdbuf, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  if (pclose (pipf))
+    {
+      fprintf (stderr, "%s: failed to pclose %s (%s) [%s:%d]\n",
+	       prog_name, cmdbuf, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  fflush (NULL);
+  pipf = NULL;
+  /// run fltk-config -g --ldflags
+  memset (cmdbuf, 0, sizeof (cmdbuf));
+  snprintf (cmdbuf, sizeof (cmdbuf), "%s -g --ldlags", fc);
+  printf ("%s running %s [%s:%d]\n", prog_name, cmdbuf, __FILE__, __LINE__);
+  pipf = popen (cmdbuf, "r");
+  if (!pipf)
+    {
+      fprintf (stderr, "%s: failed to popen %s (%s) [%s:%d]\n",
+	       prog_name, cmdbuf, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  if (!fgets (fldflags, sizeof (fldflags), pipf))
+    {
+      fprintf (stderr, "%s: failed to get ldflags using %s (%s) [%s:%d]\n",
+	       prog_name, cmdbuf, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  if (pclose (pipf))
+    {
+      fprintf (stderr, "%s: failed to pclose %s (%s) [%s:%d]\n",
+	       prog_name, cmdbuf, strerror (errno), __FILE__, __LINE__);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  fflush (NULL);
+  pipf = NULL;
+  const char *tmp_testfltk_src
+    = temporary_textual_file ("tmp_test_fltk", ".cc", __LINE__);
+  FILE *fltksrc = fopen (tmp_testfltk_src, "w");
+  if (!fltksrc)
+    {
+      fprintf (stderr,
+	       "%s: failed to fopen for FLTK testing %s (%s) [%s:%d]\n",
+	       prog_name, tmp_testfltk_src, strerror (errno), __FILE__,
+	       __LINE__ - 2);
+      failed = true;
+      exit (EXIT_FAILURE);
+    };
+  fprintf (fltksrc, "/// FLTK test file %s\n", tmp_testfltk_src);
+  fputs ("#include <FL/Fl.H>\n", fltksrc);
+  fputs ("#include <FL/Fl_Window.H>\n", fltksrc);
+  fputs ("#include <FL/Fl_Box.H>\n", fltksrc);
+  fputs ("\n", fltksrc);
+  fputs ("int main(int argc, char **argv) {\n", fltksrc);
+  fputs ("   Fl_Window *window = new Fl_Window(340, 180);\n", fltksrc);
+  fputs ("   Fl_Box *box = new Fl_Box(20, 40, 300, 100,\n", fltksrc);
+  fputs ("                            \"Hello, World!\");\n", fltksrc);
+  fputs ("   box->box(FL_UP_BOX);\n", fltksrc);
+  fputs ("   box->labelfont(FL_BOLD + FL_ITALIC);\n", fltksrc);
+  fputs ("   box->labelsize(36);\n", fltksrc);
+  fputs ("   box->labeltype(FL_SHADOW_LABEL);\n", fltksrc);
+  fputs ("   window->end();\n", fltksrc);
+  fputs ("   if (argc>1 && !strcmp(argv[1], \"--run\")) {\n", fltksrc);
+  fputs ("     argv[1] = argv[0];\n", fltksrc);
+  fputs ("     window->show(argc-1, argv+1);\n", fltksrc);
+  fputs ("     return Fl::run();\n", fltksrc);
+  fputs ("   };\n", fltksrc);
+  fputs ("  return 0;\n", fltksrc);
+  fputs ("}\n", fltksrc);
+  fprintf (fltksrc, "/// end of FLTK test file %s\n", tmp_testfltk_src);
+  if (fclose (fltksrc))
+    {
+      fprintf (stderr,
+	       "%s: failed to fclose for FLTK testing %s (%s) [%s:%d]\n",
+	       prog_name, tmp_testfltk_src, strerror (errno), __FILE__,
+	       __LINE__ - 2);
+      failed = true;
+      exit (EXIT_FAILURE);
+    };
+  fltksrc = NULL;
+  char *tmp_fltk_exe =
+    temporary_binary_file ("./tmp_fltkprog", ".bin", __LINE__);
+  memset (cmdbuf, 0, sizeof (cmdbuf));
+  snprintf (cmdbuf, sizeof (cmdbuf), "%s -g -O %s %s %s -o %s",
+	    cpp_compiler, fcflags, tmp_testfltk_src, fldflags, tmp_fltk_exe);
+  printf ("%s build test FLTK executable %s from %s with %s\n", prog_name,
+	  tmp_fltk_exe, tmp_testfltk_src, cpp_compiler);
+  fflush (NULL);
+  if (system (cmdbuf) > 0)
+    {
+      fprintf (stderr,
+	       "%s failed build test FLTK executable %s from %s [%s:%d]\n",
+	       prog_name, tmp_fltk_exe, tmp_testfltk_src, __FILE__,
+	       __LINE__ - 1);
+      fflush (stderr);
+      fprintf (stderr, "... using\n%s\n...[%s:%d]\n",
+	       cmdbuf, __FILE__, __LINE__);
+      fflush (NULL);
+      failed = true;
+      exit (EXIT_FAILURE);
+    }
+  should_remove_file (tmp_testfltk_src, __LINE__);
+  should_remove_file (tmp_fltk_exe, __LINE__);
+}				/* end try_then_set_fltkconfig */
 
 void
 remove_files (void)
@@ -587,6 +725,9 @@ remove_files (void)
 	unlink (files_to_remove_at_exit[i]);
     }
 }				/* end remove_files */
+
+
+
 
 void
 emit_configure_refpersys_mk (void)
@@ -608,8 +749,10 @@ emit_configure_refpersys_mk (void)
   fprintf (f, "# generated from %s:%d in %s\n", __FILE__, __LINE__,
 	   my_cwd_buf);
   fprintf (f, "# see refpersys.org\n");
-  fprintf (f, "# generated at %s## on %s git %s\n",
+  fprintf (f, "# generated at %s## on %s git %s\n\n",
 	   ctime (&nowt), my_host_name, GIT_ID);
+  fprintf (f, "#  generated from %s:%d\n", __FILE__, __LINE__);
+  fprintf (f, "REFPERSYS_CONFIGURED_GITID=%s\n\n", GIT_ID);
   //// emit C compiler
   fprintf (f, "\n\n" "# the C compiler for RefPerSys:\n");
   fprintf (f, "REFPERSYS_CC=%s\n", c_compiler);
@@ -654,7 +797,21 @@ emit_configure_refpersys_mk (void)
       fprintf (f, "\n\n"
 	       "# default compiler flags for RefPerSys [%s:%d]:\n",
 	       __FILE__, __LINE__ - 1);
-      fprintf (f, "REFPERSYS_COMPILER_FLAGS= -O -g -fPIC\n");
+      /// most Linux compilers accept -Wall (but intel proprietary
+      /// compiler might reject -Wextra)
+      ///
+      /// see https://stackoverflow.com/q/2224334/841108
+#ifdef __GNUC__
+      fprintf (f, "## see stackoverflow.com/q/2224334/841108\n");
+      fprintf (f, "#GNU compiler from %s:%d\n"
+	       "REFPERSYS_COMPILER_FLAGS= -Og -g -fPIC -Wall -Wextra\n",
+	       __FILE__, __LINE__ - 2);
+#else
+      fprintf (f, "#nonGNU compiler from %s:%d\n"
+	       "## see stackoverflow.com/questions/2224334/\n"
+	       "REFPERSYS_COMPILER_FLAGS= -O0 -g -fPIC -Wall",
+	       __FILE__, __LINE__ - 3);
+#endif
     }
   //// emit linker flags
   if (linker_argcount > 0)
@@ -677,12 +834,44 @@ emit_configure_refpersys_mk (void)
       fprintf (f,
 	       "REFPERSYS_LINKER_FLAGS= -L/usr/local/lib -rdynamic -ldl\n");
     }
+  //// emit the generic preprocessor
+  fprintf (f,
+	   "\n\n"
+	   "# the Generic Preprocessor for RefPerSys (see logological.org/gpp):\n");
+  fprintf (f, "REFPERSYS_GPP=%s\n", realpath (gpp, NULL));
+  /// emit the ninja builder
+  fprintf (f, "\n\n" "# ninja builder from ninja-build.org\n");
+  fprintf (f, "REFPERSYS_NINJA=%s\n", realpath (ninja_builder, NULL));
+  if (builder_person)
+    {
+      fprintf (f, "## refpersys builder person and perhaps email\n");
+      fprintf (f, "REFPERSYS_BUILDER_PERSON='%s'\n", builder_person);
+      if (builder_email)
+	{
+	  fprintf (f, "REFPERSYS_BUILDER_EMAIL='%s'\n", builder_email);
+	}
+    }
+  //// emit the FLTK configurator
+  if (fltk_config)
+    {
+      fprintf (f, "\n# FLTK (see fltk.org) configurator\n");
+      fprintf (f, "REFPERSYS_FLTKCONFIG=%s\n", fltk_config);
+    }
+  ////
+  fprintf (f, "\n### machine architecture\n");
+  fprintf (f, "REFPERSYS_ARCH=%s\n", rpsconf_arch);
+  fprintf (f, "\n### operating system\n");
+  fprintf (f, "REFPERSYS_OPERSYS=%s\n", rpsconf_opersys);
+  fprintf (f, "\n### building hostname\n");
+  fprintf (f, "REFPERSYS_BUILDHOST=%s\n", rpsconf_host);
+  ////
   fprintf (f, "\n\n### end of generated _config-refpersys.mk file\n");
   fflush (f);
-  if (!link (tmp_conf, "_config-refpersys.mk"))
+  if (link (tmp_conf, "_config-refpersys.mk"))
     {
-      fprintf (stderr, "%s failed to link %s to _config-refpersys.mk (%m)\n",
-	       prog_name, tmp_conf);
+      fprintf (stderr, "%s failed to hardlink %s to _config-refpersys.mk\n"
+	       " (%s, %s:%d, git " GIT_ID ")\n",
+	       prog_name, tmp_conf, strerror (errno), __FILE__, __LINE__);
       failed = true;
       exit (EXIT_FAILURE);
     };
@@ -712,27 +901,35 @@ usage (void)
 {
   puts ("# configuration utility program for refpersys.org");
   printf ("%s usage:\n", prog_name);
-  puts ("\t --version             # show version");
-  puts ("\t --help                # this help");
-  puts
-    ("\t <var>=<value>         # putenv, set environment variable, e.g...");
-  puts
-    ("\t CC=<C compiler>       # set the C compiler, e.g. CC=/usr/bin/gcc");
-  puts
-    ("\t CXX=<C++ compiler>    # set the C++ compiler, e.g. CXX=/usr/bin/g++");
-  puts
-    ("\t -D<prepro>            # define a preprocessor thing, e.g. -DFOO=3");
-  puts
-    ("\t -U<prepro>            # undefine a preprocessor thing, e.g. -UBAR");
-  puts ("\t -I<include-dir>       # preprocessor include, e.g. -I$HOME/inc/");
-  puts
-    ("\t -std=<standard>       # language standard for C++, e.g. -std=gnu++17");
-  puts ("\t -O<flag>              # optimization flag, e.g. -O or -O2");
-  puts ("\t -g<flag>              # debugging flag, e.g. -g or -g3");
-  puts ("\t -fPIC                 # position independent code");
-  puts ("\t -fPIE                 # position independent executable");
-  puts
-    ("# generate the _configure-refpersys.mk file for inclusion by GNU make");
+  puts ("\t --version               # show version");
+  puts ("\t --help                  # this help");
+  puts ("\t <var>=<value>           # putenv, set environment variable");
+  puts ("\t                         # ... e.g. PRINTER=lp0");
+  puts ("\t CC=<C compiler>         # set the C compiler,");
+  puts ("\t                         # e.g. CC=/usr/bin/gcc");
+  puts ("\t CXX=<C++ compiler>      # set the C++ compiler,");
+  puts ("\t                         # e.g. CXX=/usr/bin/g++");
+  puts ("\t NINJA=<ninja-builder>   # set builder from ninja-build.org");
+  puts ("\t                         # e.g. NINJA=/usr/bin/ninja");
+  puts ("\t FLTKCONF=<fltk-config>  # set path of fltk-config, see fltk.org");
+  puts ("\t BUILDER_PERSON=<name>   # set the name of the person building");
+  puts ("\t                         # e.g. BUILDER_PERSON='Alan TURING");
+  puts ("\t BUILDER_EMAIL=<email>   # set the email of the person building");
+  puts ("\t                         # e.g. BUILDER_EMAIL=''");
+  puts ("\t -D<prepro>              # define a preprocessor thing,");
+  puts ("\t                         # e.g. -DFOO=3");
+  puts ("\t -U<prepro>              # undefine a preprocessor thing,");
+  puts ("\t                         # e.g. -UBAR");
+  puts ("\t -I<include-dir>         # preprocessor include,");
+  puts ("\t                         # e.g. -I$HOME/inc/");
+  puts ("\t -std=<standard>         # language standard for C++,");
+  puts ("\t                         # e.g. -std=gnu++17");
+  puts ("\t -O<flag>                # optimization flag, e.g. -O2");
+  puts ("\t -g<flag>                # debugging flag, e.g. -g or -g3");
+  puts ("\t -fPIC                   # position independent code");
+  puts ("\t -fPIE                   # position independent executable");
+  puts ("# generate the _configure-refpersys.mk file");
+  puts ("# for inclusion by GNU make");
   puts ("# GPLv3+ licensed, so no warranty");
 }				/* end usage */
 
@@ -777,6 +974,8 @@ main (int argc, char **argv)
       exit (EXIT_FAILURE);
     };
   atexit (remove_files);
+  printf ("%s: when asked for a file path, you can run a shell command ...\n"
+	  "... if your input starts with an exclamation point\n", prog_name);
   if (argc > MAX_PROG_ARGS)
     {
       fprintf (stderr,
@@ -839,11 +1038,100 @@ main (int argc, char **argv)
     cc = my_readline ("C compiler, preferably gcc:");
   if (!cc)
     cc = "/usr/bin/gcc";
-  try_then_set_c_compiler (cc);
+
+  if (rps_conf_cc_set (cc) == RPS_CONF_FAIL)
+    exit (EXIT_FAILURE);
+
   char *cxx = getenv ("CXX");
   if (!cxx)
     cxx = my_readline ("C++ compiler:");
   try_then_set_cxx_compiler (cxx);
+  builder_person =
+    my_readline ("person building RefPerSys (eg Alan TURING):");
+  if (builder_person && isspace (builder_person[0]))
+    {
+      free ((void *) builder_person);
+      builder_person = NULL;
+    };
+  if (builder_person)
+    {
+      builder_email =
+	my_readline
+	("email of person building (e.g. alan.turing@princeton.edu):");
+      bool goodemail = builder_email != NULL && isalnum (builder_email[0]);
+      const char *pc = builder_email;
+      for (pc = builder_email; *pc && goodemail && *pc != '@'; pc++)
+	{
+	  if (!isalnum (*pc) && *pc != '+' && *pc != '-' && *pc != '_'
+	      && *pc != '.')
+	    goodemail = false;
+	};
+      if (goodemail && *pc == '@')
+	pc++;
+      else
+	goodemail = false;
+      int nbdots = 0;
+      for (pc = pc;
+	   *pc && goodemail && (isalnum (*pc) || strchr ("+-_.:", *pc)); pc++)
+	{
+	  if (*pc == '.')
+	    nbdots++;
+	};
+      if (nbdots == 0)
+	goodemail = false;
+      if (!goodemail)
+	{
+	  free ((void *) builder_email);
+	  builder_email = NULL;
+	}
+    }
+  errno = 0;
+  gpp = getenv ("GPP");
+  if (!gpp)
+    {
+      puts
+	("Generic Preprocessor (by Tristan Miller and Denis Auroux, see logological.org/gpp ...)");
+      gpp = my_readline ("Generic Preprocessor full path:");
+      if (access (gpp, X_OK))
+	{
+	  fprintf (stderr,
+		   "%s bad Generic Preprocessor %s (%s) [%s:%d]\n",
+		   prog_name, gpp ? gpp : "???", strerror (errno),
+		   __FILE__, __LINE__ - 3);
+	  failed = true;
+	  exit (EXIT_FAILURE);
+	}
+    };
+  assert (gpp != NULL);
+
+  ninja_builder = getenv ("NINJA");
+  if (!ninja_builder)
+    {
+      ninja_builder = my_readline ("ninja builder:");
+      if (access (ninja_builder, X_OK))
+	{
+	  fprintf (stderr,
+		   "%s bad ninja builder %s (%s) [%s:%d]\n",
+		   prog_name, ninja_builder ? ninja_builder : "???",
+		   strerror (errno), __FILE__, __LINE__ - 3);
+	  failed = true;
+	  exit (EXIT_FAILURE);
+	}
+    };
+  fltk_config = getenv ("FLTKCONFIG");
+  if (!fltk_config)
+    {
+      fltk_config = my_readline ("FLTK configurator:");
+      if (access (fltk_config, X_OK))
+	{
+	  fprintf (stderr,
+		   "%s bad FLTK configurator %s (%s) [%s:%d]\n",
+		   prog_name, fltk_config ? fltk_config : "???",
+		   strerror (errno), __FILE__, __LINE__ - 3);
+	  failed = true;
+	  exit (EXIT_FAILURE);
+	}
+    }
   ///emit file config-refpersys.mk to be included by GNU make 
   emit_configure_refpersys_mk ();
   fprintf (stderr,
@@ -854,5 +1142,216 @@ main (int argc, char **argv)
   /// that hypothetical refpersys-config.h would be included by refpersys.hh
 }				/* end main */
 
+/*
+ * Helper Functions
+ */
 
-/// eof do-configure-refpersys.c
+/*
+ * Function: rps_conf_diag__
+ *   Prints a diagnostic message to stderr, with optional verbosity.
+ *
+ * Inputs:
+ *   - file: source file path, provided by __FILE__
+ *   - line: source file line number, provided by __LINE__
+ *   - fmt: formatted message string
+ *
+ * Outputs:
+ *   Prints diagnostic message on to stderr
+ *
+ * Preconditions:
+ *   - file is not null
+ *   - file is not an empty string
+ *   - line > 0
+ *   - fmt is not null
+ *   - fmt is not an empty string
+ *
+ * Postconditions:
+ *   None
+ */
+void
+rps_conf_diag__ (const char *file, int line, const char *fmt, ...)
+{
+  va_list ap;
+
+  assert (file != NULL && *file != '\0');
+  assert (line > 0);
+  assert (fmt != NULL && *fmt != '\0');
+
+  va_start (ap, fmt);
+  (void) fprintf (stderr, "%s: error: ", prog_name);
+  (void) vfprintf (stderr, fmt, ap);
+
+  if (rps_conf_verbose)
+    (void) fprintf (stderr, " [%s:%d]\n", file, line);
+  else
+    (void) fputs ("\n", stderr);
+
+  va_end (ap);
+}
+
+/*
+ * Function: rps_conf_cc_test
+ *   Attempts to compile and run a simple "Hello, world" C program.
+ *
+ * Inputs:
+ *   - cc: absolute path to C compiler
+ *
+ * Outputs:
+ *   None
+ *
+ * Preconditions:
+ *   - cc is not null
+ *
+ * Postconditions:
+ *   None
+ */
+void
+rps_conf_cc_test (const char *cc)
+{
+  char *helloworldsrc = NULL;
+  char helloworldbin[128];
+  memset (helloworldbin, 0, sizeof (helloworldbin));
+  helloworldsrc = temporary_textual_file ("tmp_helloworld_", ".c", __LINE__);
+  FILE *hwf = fopen (helloworldsrc, "w");
+  if (!hwf)
+    {
+      fprintf (stderr,
+	       "%s failed to create temporary hello world C %s (%m)\n",
+	       prog_name, helloworldsrc);
+    }
+  fprintf (hwf, "/// temporary hello world C file %s\n", helloworldsrc);
+  fprintf (hwf, "#include <stdio.h>\n");
+  fprintf (hwf, "void say_hello(const char*c) {\n");
+  fprintf (hwf, " printf(\"hello from %%s in %%s:%%d\\n\",\n");
+  fprintf (hwf, "        c, __FILE__, __LINE__);\n");
+  fprintf (hwf, "} //end say_hello\n");
+  fprintf (hwf, "\n\n");
+  fprintf (hwf, "int main(int argc,char**argv) { say_hello(argv[0]); }\n");
+  fclose (hwf);
+  snprintf (helloworldbin, sizeof (helloworldbin), "./%s",
+	    basename (helloworldsrc));
+  char *lastdot = strrchr (helloworldbin, '.');
+  if (lastdot)
+    strcpy (lastdot, ".bin");
+  else
+    strcat (helloworldbin, ".bin");
+  assert (lastdot);
+  {
+    char helloworldcompile[512];
+    memset (helloworldcompile, 0, sizeof (helloworldcompile));
+    snprintf (helloworldcompile, sizeof (helloworldcompile),
+	      "%s -Wall -O %s -o %s", cc, helloworldsrc, helloworldbin);
+    printf ("trying %s\n", helloworldcompile);
+    fflush (NULL);
+    int e = system (helloworldcompile);
+    if (e)
+      {
+	fprintf (stderr,
+		 "%s failed to compile hello world in C : %s exited %d\n",
+		 prog_name, helloworldcompile, e);
+	failed = true;
+	exit (EXIT_FAILURE);
+      };
+    should_remove_file (helloworldsrc, __LINE__);
+    should_remove_file (helloworldbin, __LINE__);
+    printf ("popen-eing %s\n", helloworldbin);
+    fflush (NULL);
+    FILE *pf = popen (helloworldbin, "r");
+    if (!pf)
+      {
+	fprintf (stderr, "%s failed to popen hello world in C %s (%m)\n",
+		 prog_name, helloworldbin);
+	failed = true;
+	exit (EXIT_FAILURE);
+      };
+    bool gothello = false;
+    int nblin = 0;
+    do
+      {
+	char hwline[128];
+	memset (hwline, 0, sizeof (hwline));
+	if (!fgets (hwline, sizeof (hwline), pf))
+	  break;
+	nblin++;
+	if (strstr (hwline, "hello"))
+	  gothello = true;
+      }
+    while (!feof (pf));
+    if (!gothello)
+      {
+	fprintf (stderr,
+		 "%s popen %s without hello but read %d lines from popen [%s:%d]\n",
+		 prog_name, helloworldbin, nblin, __FILE__, __LINE__ - 1);
+	failed = true;
+	exit (EXIT_FAILURE);
+      }
+    int ehw = pclose (pf);
+    if (ehw)
+      {
+	fprintf (stderr, "%s bad pclose %s (%d)\n",
+		 prog_name, helloworldbin, ehw);
+	failed = true;
+	exit (EXIT_FAILURE);
+      };
+    printf ("%s: tested hello world C compilation and run [%s:%d]\n",
+	    prog_name, __FILE__, __LINE__);
+  }
+}				/* end rps_conf_cc_test */
+
+
+/*
+ * Function: rps_conf_cc_set
+ *   Sets the path to the C compiler after checking that it works.
+ *
+ * Inputs:
+ *   - cc: absolute path to C compiler
+ *
+ * Outputs:
+ *   - RPS_CONF_OK:   function succeeded
+ *   - RPS_CONF_FAIL: function failed
+ *
+ * Preconditions:
+ *   - cc is not null
+ *   - cc is not an empty string
+ *   - cc is an absolute path
+ *
+ * Postconditions:
+ *   None
+ */
+int
+rps_conf_cc_set (const char *cc)
+{
+  assert (cc != NULL);
+  if (*cc == '\0')
+    {
+      rps_conf_diag ("missing C compiler path");
+      return RPS_CONF_FAIL;
+    };
+
+  if (*cc != '/')
+    {
+      rps_conf_diag ("%s: C compiler path not absolute", cc);
+      return RPS_CONF_FAIL;
+    };
+
+  errno = 0;
+  if (access (cc, X_OK))
+    {
+      rps_conf_diag ("%s: C compiler path not executable", cc);
+      return RPS_CONF_FAIL;
+    };
+
+  rps_conf_cc_test (cc);
+  c_compiler = cc;
+  return RPS_CONF_OK;
+}				/* end rps_conf_cc_set */
+
+
+/****************
+ **                           for Emacs...
+ ** Local Variables: ;;
+ ** compile-command: "make do-configure-refpersys" ;;
+ ** End: ;;
+ ****************/
+
+/// end of file do-configure-refpersys.c

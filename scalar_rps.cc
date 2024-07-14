@@ -4,14 +4,14 @@
  *
  * Description:
  *      This file is part of the Reflective Persistent System.
- *      Implementation related to scalar values
+ *      Implementation related to scalar values (and strings)
  *
  * Author(s):
  *      Basile Starynkevitch <basile@starynkevitch.net>
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2020 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -36,6 +36,9 @@ const char rps_scalar_gitid[]= RPS_GITID;
 
 extern "C" const char rps_scalar_date[];
 const char rps_scalar_date[]= __DATE__;
+
+extern "C" const char rps_scalar_shortgitid[];
+const char rps_scalar_shortgitid[]= RPS_SHORTGITID;
 
 /** important NOTICE
  *
@@ -361,5 +364,117 @@ rps_output_utf8_cjson(std::ostream&out, const char*str, int bytlen)
     }
 } // end rps_output_utf8_cjson
 
+
+/** Given a shell pattern like foo/x*.h and a directory path like
+   /usr/include:/usr/local/include find a readable plain file path;
+   tilde patterns ~joe are expanded and $XX are expanded but not command
+   line substitution like $(ls -lt *foo|head -1); for example
+   rps_glob_plain_path("sys/stat.h",
+   "/usr/include/:/usr/include/x86-64-linux/gnu/") would return
+   "/usr/include/sys/stat.h" on my Linux desktop. If no file is found,
+   the empty string is returned. */
+std::string
+rps_glob_plain_file_path(const char*shellpatt, const char*dirpath)
+{
+#warning unimplemented rps_glob_plain_file_path
+  if (!shellpatt || !shellpatt[0])
+    return std::string(nullptr);
+  if (shellpatt[0] == '~')
+    {
+      wordexp_t wx = {};
+      int err = wordexp(shellpatt, &wx, WRDE_NOCMD|WRDE_UNDEF);
+      if (err)
+        {
+          wordfree(&wx);
+          return std::string(nullptr);
+        };
+      if (wx.we_wordc==0)
+        {
+          wordfree(&wx);
+          return std::string(nullptr);
+        };
+      if (wx.we_wordc==1)
+        {
+          char*rp = realpath(wx.we_wordv[0], nullptr);
+          struct stat rs= {};
+          wordfree(&wx);
+          if (stat(rp, &rs) || (rs.st_mode & S_IFMT)!=S_IFREG
+              || access(rp, R_OK))
+            {
+              free (rp);
+              return std::string(nullptr);
+            };
+          return std::string(rp);
+        }
+      // several files but starting with ~
+      {
+        wordfree(&wx);
+        return std::string(nullptr);
+      };
+    }
+  else if (shellpatt[0] == '/')
+    {
+      /// absolute file path
+      glob_t g = {};
+      if (glob(shellpatt, GLOB_ERR|GLOB_MARK|GLOB_TILDE_CHECK, nullptr, &g))
+        {
+          globfree(&g);
+          return std::string(nullptr);
+        };
+      if (g.gl_pathc != 1)
+        {
+          globfree(&g);
+          return std::string(nullptr);
+        }
+      char*rp = realpath(g.gl_pathv[0], nullptr);
+      struct stat rs= {};
+      globfree(&g);
+      if (stat(rp, &rs) || (rs.st_mode & S_IFMT)!=S_IFREG
+          || access(rp, R_OK))
+        {
+          free (rp);
+          return std::string(nullptr);
+        };
+      return std::string(rp);
+    };
+  if (!dirpath || !dirpath[0])
+    return std::string(nullptr);
+  {
+    std::string dirstr(dirpath);
+    const char* pc=nullptr;
+    const char* colon=nullptr;
+    for (pc = dirstr.c_str(); pc && *pc; pc = (colon?(colon+1):nullptr))
+      {
+        colon = strchr(pc, ':');
+        std::string curdir;
+        if (colon) curdir=std::string(pc, colon-pc-1);
+        else curdir=std::string(pc);
+        /// absolute file path
+        glob_t g = {};
+        std::string curpatt = curdir + "/" + shellpatt;
+        if (glob(curpatt.c_str(), GLOB_ERR|GLOB_MARK, nullptr, &g))
+          {
+            globfree(&g);
+            return std::string(nullptr);
+          };
+        if (g.gl_pathc != 1)
+          {
+            globfree(&g);
+            return std::string(nullptr);
+          }
+        char*rp = realpath(g.gl_pathv[0], nullptr);
+        struct stat rs= {};
+        globfree(&g);
+        if (stat(rp, &rs) || (rs.st_mode & S_IFMT)!=S_IFREG
+            || access(rp, R_OK))
+          {
+            free (rp);
+            return std::string(nullptr);
+          };
+        return std::string(rp);
+      }
+  }
+  return std::string(nullptr);
+} // end rps_glob_plain_file_path
 
 //////////////////////////////////////////////// end of file scalar_rps.cc

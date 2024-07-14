@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2020 - 2023 The Reflective Persistent System Team
+ *      © Copyright 2020 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -36,12 +36,17 @@
 extern "C" const char rps_agenda_gitid[];
 const char rps_agenda_gitid[]= RPS_GITID;
 
+extern "C" const char rps_agenda_shortgitid[];
+const char rps_agenda_shortgitid[]= RPS_SHORTGITID;
+
 extern "C" const char rps_agenda_date[];
 const char rps_agenda_date[]= __DATE__;
 
 unsigned long rps_run_delay;
 
 double Rps_Agenda::agenda_timeout;
+thread_local int rps_curthread_ix;
+thread_local Rps_CallFrame* rps_curthread_callframe;
 
 std::recursive_mutex Rps_Agenda::agenda_mtx_;
 std::condition_variable_any Rps_Agenda::agenda_changed_condvar_;
@@ -51,6 +56,7 @@ std::deque<Rps_ObjectRef> Rps_Agenda::agenda_fifo_[Rps_Agenda::AgPrio__Last];
 std::atomic<unsigned long>  Rps_Agenda::agenda_add_counter_;
 std::atomic<bool> Rps_Agenda::agenda_is_running_;
 std::atomic<std::thread*> Rps_Agenda::agenda_thread_array_[RPS_NBJOBS_MAX+2];
+
 const char*
 Rps_Agenda::agenda_priority_names[Rps_Agenda::AgPrio__Last];
 std::atomic<Rps_Agenda::workthread_state_en>
@@ -58,7 +64,7 @@ Rps_Agenda::agenda_work_thread_state_[RPS_NBJOBS_MAX+2];
 std::atomic<bool> Rps_Agenda::agenda_needs_garbcoll_;
 std::atomic<uint64_t> Rps_Agenda::agenda_cumulw_gc_;
 std::atomic<Rps_CallFrame*> Rps_Agenda::agenda_work_gc_callframe_[RPS_NBJOBS_MAX+2];
-
+std::atomic<Rps_CallFrame**> Rps_Agenda::agenda_work_gc_current_callframe_ptr[RPS_NBJOBS_MAX+2];
 void
 Rps_Agenda::initialize(void)
 {
@@ -72,6 +78,11 @@ Rps_Agenda::initialize(void)
     }
   else
     agenda_timeout = 0.0;
+  RPS_POSSIBLE_BREAKPOINT();
+  RPS_DEBUG_LOG(REPL, "Rps_Agenda::initialize agenda_timeout=" << agenda_timeout
+                << " curthr:" << rps_current_pthread_name()
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "Rps_Agenda::initialize"));
 } // end Rps_Agenda::initialize
 
 void
@@ -182,6 +193,9 @@ Rps_Agenda::run_agenda_worker(int ix)
   memset (pthname, 0, sizeof(pthname));
   snprintf(pthname, sizeof(pthname), "rps-agw#%hd", (short) ix);
   pthread_setname_np(pthread_self(), pthname);
+  rps_curthread_ix = ix;
+  rps_curthread_callframe = nullptr;
+  agenda_work_gc_current_callframe_ptr[ix].store(&rps_curthread_callframe);
   RPS_LOCALFRAME(RPS_ROOT_OB(_1aGtWm38Vw701jDhZn), //the_agenda,
                  RPS_NULL_CALL_FRAME, // no caller frame
                  Rps_ObjectRef obtasklet;
@@ -199,7 +213,7 @@ Rps_Agenda::run_agenda_worker(int ix)
   {
     /// we sleep a different amount of time to help ensure other threads do
     /// start...
-    std::this_thread::sleep_for(30ms + ix * 10ms);
+    std::this_thread::sleep_for(32ms + ix * 16ms);
     int cnt=0;
     constexpr int maxloop = 100;
     for (cnt=0; cnt<=maxloop; cnt++)
@@ -212,6 +226,7 @@ Rps_Agenda::run_agenda_worker(int ix)
           }
         if (curthr->get_id() == std::this_thread::get_id())
           break;
+        RPS_POSSIBLE_BREAKPOINT();
         std::this_thread::sleep_for(2ms);
       }
     if (cnt>=maxloop) // won't happen in practice
@@ -298,6 +313,7 @@ void
 Rps_Agenda::do_garbage_collect(int ix, Rps_CallFrame*callframe)
 {
   RPS_ASSERT(ix>=0 && ix<=RPS_NBJOBS_MAX);
+  RPS_ASSERT(ix == rps_curthread_ix);
   RPS_ASSERT(agenda_work_gc_callframe_[ix].load() == nullptr);
   agenda_work_thread_state_[ix].store(Rps_Agenda::WthrAg_GC);
   agenda_work_gc_callframe_[ix].store(callframe);
@@ -446,6 +462,15 @@ rpsldpy_agenda(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id 
   RPS_ASSERT(ld != nullptr);
   RPS_ASSERT(obz->get_payload() == nullptr);
   RPS_ASSERT(jv.type() == Json::objectValue);
+  RPS_ASSERT(spacid);
+  RPS_ASSERT(lineno>0);
+  if (obz != RPS_ROOT_OB(_1aGtWm38Vw701jDhZn))   // the agenda rps_rootob_1aGtWm38Vw701jDhZn
+    {
+      RPS_POSSIBLE_BREAKPOINT();
+      RPS_FATALOUT("in space " << spacid << " line " << lineno
+                   << " obz=" << Rps_ObjectRef(obz)
+                   << " the_agenda is RPS_ROOT_OB(_1aGtWm38Vw701jDhZn)");
+    }
   auto paylagenda = obz->put_new_plain_payload<Rps_PayloadAgenda>();
   RPS_ASSERT(paylagenda);
   for (int  ix= Rps_Agenda::AgPrio_Low; ix< Rps_Agenda::AgPrio__Last; ix++)

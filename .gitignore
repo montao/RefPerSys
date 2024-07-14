@@ -6,5 +6,14 @@ do-scan-pkgconfig
 refpersys
 tmp_*
 *.o
+*.orig
 *~
 *.BAK
+do-build-plugin
+.ninja_deps
+.ninja_logs
+.ninja_log
+generated/rpsdata.h
+doc/design-ideas/refpersys-design.out
+doc/design-ideas/refpersys-design.pdf
+doc/design-ideas/refpersys-design.aux

@@ -5,7 +5,7 @@
 #      Abhishek Chakravarti <abhishek@taranjali.org>
 #      Nimesh Neema <nimeshneema@gmail.com>
 #
-#      © Copyright 2020 - 2022 The Reflective Persistent System Team
+#      © Copyright 2020 - 2024 The Reflective Persistent System Team
 #      team@refpersys.org & http://refpersys.org/
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -24,30 +24,79 @@
 ### invocation as
 ##     ./build-plugin.sh <C++-plugin-source> <plugin-sharedobject>
 
+### example
+##  To compile the C++ plugin source in file  plugins_dir/rpsplug_createclass.cc
+##  into the dlopen-able shared object /tmp/rpsplug_createclass.so
+##  run the following command
+##     ./build-plugin.sh plugins_dir/rpsplug_createclass.cc \
+##                       /tmp/rpsplug_createclass.so
+##  a later invocation of refpersys is explained in a C++ comment in
+##  this C++ plugin file plugins_dir/rpsplug_createclass.cc
+## the C++ plugin source may contain comments driving this compilation.
+
+
+## TODO: in commit 3dc7163fa129 of May 15, 2024 this is a buggy
+## script. I (Basile S.) hope for some Python3 expert to replace it
+## with a more robust Python script which would scan the C++ source
+## code comments....
+
+## same as MY_HEAD_LINES_THRESHOLD in do-scan-pkgconfig.c
+MY_HEAD_LINES_THRESHOLD=384
+
+if [ "$1" = '--help' ]; then
+    echo $0 usage to compile a RefPerSys plugin C++ code on Linux:
+    echo $0 "<plugin-C++-source-file>" "<output-shared-object>"
+    echo for example: $0 plugins_dir/rpsplug_createclass.cc /tmp/rpsplug_createclass.so
+    echo a later execution is: ./refpersys --plugin-after-load=/tmp/rpsplug_createclass.so
+    echo and is given in that plugins_dir/rpsplug_createclass.cc file :
+    /bin/head -20 plugins_dir/rpsplug_createclass.cc
+    exit
+fi
+
 cppfile=$1
 pluginfile=$2
 declare curdate;
 curdate=$(date +%c);
-printf "start %s at %s: C++ file %s, plugin file %s\n" $0 "$curdate" $cppfile $pluginfile > /dev/stderr
-logger --id=$$ -s  -t "$0:" "starting" cppfile= $1 pluginfile= $2 curdate= $curdate
-eval $(make print-plugin-settings)
+declare pkglist;
+pkglist=""
 
+printf "start %s at %s: C++ file %s, plugin file %s in %s\n" $0 \
+       "$curdate" $cppfile $pluginfile "$(/bin/pwd)" > /dev/stderr
+
+if [ -z "$REFPERSYS_TOPDIR" ]; then
+    printf "%s: missing REFPERSYS_TOPDIR\n" $0 > /dev/stderr
+    exit 1
+fi
+
+/usr/bin/logger --id=$$ -s  -t "$0:" "starting" cppfile= $1 pluginfile= $2 curdate= $curdate REFPERSYS_TOPDIR= $REFPERSYS_TOPDIR cwd $(/bin/pwd)
+
+eval $(/usr/bin/gmake print-plugin-settings)
+
+### plugincppflags contain compiler flags
+### pluginlinkerflags contain linker flags
+#### Scan the C++ source files for comments giving compiler and linker flags.
 if /usr/bin/fgrep -q '@RPSCOMPILEFLAGS=' $cppfile ; then
-    plugincppflags=$(/bin/head -50 $cppfile | /usr/bin/gawk --source '/@RPSCOMPILEFLAGS=/ { for (i=1; i<=NF; i++) print $i; }')
+    plugincppflags=$(/bin/head -$MY_HEAD_LINES_THRESHOLD $cppfile | /usr/bin/gawk --source '/@RPSCOMPILEFLAGS=/ { for (i=2; i<=NF; i++) print $i; }')
 else
     plugincppflags=()
 fi
 
+
+## ugly hack needed in March 2024 after commit 456fcb27bc57f
+if [ -f /usr/include/jsoncpp/json/json.h ]; then
+    plugincppflags+=" -I/usr/include/jsoncpp"
+fi
+
 if /usr/bin/fgrep -q '@RPSLIBES=' $cppfile ; then
-    pluginlinkerflags=$(/bin/head -50 $cppfile | /usr/bin/gawk --source '/@RPSLIBES=/ { for (i=1; i<=NF; i++) print $i; }')
+    pluginlinkerflags=$(/bin/head -$MY_HEAD_LINES_THRESHOLD $cppfile | /usr/bin/gawk --source '/@RPSLIBES=/ { for (i=2; i<=NF; i++) print $i; }')
 else
     pluginlinkerflags=()
 fi
 
 if  /usr/bin/fgrep -q '//@@PKGCONFIG' $cppfile ; then
-    local pkglist=$(./do-scan-pkgconfig $cppfile)
+    pkglist=$($REFPERSYS_TOPDIR/do-scan-pkgconfig --raw $cppfile)
     plugincppflags="$plugincppflags $(pkg-config --cflags $pkglist)"
-    pluginlinkerflags="pluginlinkerflags $(pkg-config --libes $pkglist)"
+    pluginlinkerflags="$pluginlinkerflags $(pkg-config --libs $pkglist)"
 fi
 
 ## check that we have the necessary shell variables set in above eval
@@ -67,4 +116,15 @@ fi
 ## run the compiler suitably
 logger --id=$$ -s  -t $0 running: "$RPSPLUGIN_CXX $RPSPLUGIN_CXXFLAGS  $plugincppflags -Wall -fPIC -shared $cppfile $RPSPLUGIN_LDFLAGS  $pluginlinkerflags -o $pluginfile"
 ## 
-exec $RPSPLUGIN_CXX $RPSPLUGIN_CXXFLAGS $plugincppflags -Wall -fPIC -shared $cppfile $RPSPLUGIN_LDFLAGS $pluginlinkerflags -o $pluginfile 
+$RPSPLUGIN_CXX $RPSPLUGIN_CXXFLAGS $plugincppflags -Wall -Wextra -I. -fPIC -shared $cppfile $RPSPLUGIN_LDFLAGS \
+               $pluginlinkerflags -o $pluginfile  || \
+    ( \
+      printf "\n%s failed to compile RefPerSys plugin %s to %s\n \
+                (°cxxflags %s\n °cppflags %s\n °ldflags %s\n °linkerflags %s\n °pkg-list %s\n)\n" \
+             $0 $cppfile $pluginfile "$RPSPLUGIN_CXXFLAGS" "$plugincppflags" \
+             "$RPSPLUGIN_LDFLAGS" "$pluginlinkerflags" "$pkglist" > /dev/stderr ; \
+      /usr/bin/logger --id=$$ -s  -t $0 -puser.warning \
+                      "$0 failed to compile RefPerSys plugin $cppfile to $pluginfile in $(/bin/pwd)\n" ; \
+      exit 1 )
+
+## end of file RefPerSys/build-plugin.sh

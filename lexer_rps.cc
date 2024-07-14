@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org> (India)
  *      Nimesh Neema <nimeshneema@gmail.com> (India)
  *
- *      © Copyright 2019 - 2023 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -46,6 +46,10 @@ const char rps_lexer_gitid[]= RPS_GITID;
 
 extern "C" const char rps_lexer_date[];
 const char rps_lexer_date[]= __DATE__;
+
+extern "C" const char rps_lexer_shortgitid[];
+const char rps_lexer_shortgitid[]= RPS_SHORTGITID;
+
 
 extern "C" Rps_StringValue rps_lexer_token_name_str_val;
 Rps_StringValue rps_lexer_token_name_str_val(nullptr);
@@ -203,7 +207,8 @@ Rps_StreamTokenSource::Rps_StreamTokenSource(std::string path)
 void
 Rps_StreamTokenSource::display(std::ostream&out) const
 {
-  output(out);
+  output(out, 0, Rps_Value::debug_maxdepth);
+  out << std::endl;
   display_current_line_with_cursor(out);
 } // end Rps_StreamTokenSource::display
 
@@ -255,7 +260,7 @@ Rps_CinTokenSource::get_line(void)
 void
 Rps_CinTokenSource::display(std::ostream&out) const
 {
-  output(out);
+  output(out, 0, Rps_Value::debug_maxdepth);
   out << std::endl;
   display_current_line_with_cursor(out);
 } // end Rps_CinTokenSource::display
@@ -350,6 +355,101 @@ Rps_StringTokenSource::display(std::ostream&out) const
   display_current_line_with_cursor(out);
 } // end Rps_StringTokenSource::display
 
+
+
+////////////////
+
+Rps_MemoryFileTokenSource::Rps_MemoryFileTokenSource(const std::string path)
+  : Rps_TokenSource(path), toksrcmfil_path(path),
+    toksrcmfil_start(nullptr),
+    toksrcmfil_line(nullptr),
+    toksrcmfil_end(nullptr), toksrcmfil_nextpage(nullptr)
+{
+  int fd= open(path.c_str(), O_RDONLY);
+  if (fd<0)
+    RPS_FATALOUT("cannot open memory file token source " << path
+                 << ":" << strerror(errno));
+  struct stat st= {};
+  memset ((void*)&st, 0, sizeof(st));
+  if (fstat(fd, &st))
+    RPS_FATALOUT("cannot fstat fd#" << fd << " for memory file " << path
+                 << ":" << strerror(errno));
+  if ((st.st_mode & S_IFMT) != S_IFREG)
+    RPS_FATALOUT("memory file source " << path << " is not a plain regular file ; fd#" << fd);
+  size_t fsiz = st.st_size;
+  long pgsiz = sysconf(_SC_PAGESIZE);
+  RPS_ASSERT(pgsiz > 0 && (pgsiz & (pgsiz-1)) == 0); // page size should be a power of 2
+  int logpgsiz = -1;
+  for (int i=10; i<32 && logpgsiz<0; i++)
+    {
+      if (1L<<i == pgsiz)
+        {
+          logpgsiz=i;
+          break;
+        }
+    };
+  RPS_ASSERT(pgsiz == 1L<<logpgsiz);
+  size_t mappedsize = fsiz;
+  if (mappedsize & (( 1L<<logpgsiz)-1))
+    mappedsize = (mappedsize | ((1L<<logpgsiz)-1)) + 1;
+  RPS_ASSERT(mappedsize % pgsiz == 0);
+  void* ad = mmap(nullptr, mappedsize, PROT_READ, MAP_PRIVATE, fd, mappedsize);
+  if (ad == MAP_FAILED)
+    RPS_FATALOUT("memory file source " << path << " mmap failure for fd#" << fd
+                 << " " << (mappedsize>>10) << " kb " << strerror(errno));
+  toksrcmfil_start = toksrcmfil_line = (char*)ad;
+  toksrcmfil_nextpage = (char*)ad + mappedsize;
+  toksrcmfil_end = (char*)ad + fsiz;
+  close(fd);
+  RPS_DEBUG_LOG(REPL, "constr MemoryFileTokenSource@ " <<(void*)this << " " << *this);
+  RPS_DEBUG_LOG(LOWREP, "constr MemoryFileTokenSource@ " <<(void*)this << " " << *this);
+  RPS_DEBUG_LOG(CMD, "constr MemoryFileTokenSource@ " <<(void*)this << " " << *this);
+};                              // end Rps_MemoryFileTokenSource::Rps_MemoryFileTokenSource
+
+Rps_MemoryFileTokenSource::~Rps_MemoryFileTokenSource()
+{
+  RPS_DEBUG_LOG(REPL, "destr MemoryFileTokenSource@ " <<(void*)this << " " << *this);
+  RPS_DEBUG_LOG(LOWREP, "destr MemoryFileTokenSource@ " <<(void*)this << " " << *this);
+  RPS_DEBUG_LOG(CMD, "destr MemoryFileTokenSource@ " <<(void*)this << " " << *this);
+  RPS_ASSERT(toksrcmfil_start != nullptr && toksrcmfil_end != nullptr);
+  if (munmap((void*)toksrcmfil_start, toksrcmfil_nextpage-toksrcmfil_start))
+    RPS_FATALOUT("failed to munmap MemoryFileTokenSource@ " <<(void*)this
+                 << " path " << toksrcmfil_path
+                 << " from " << (void*)toksrcmfil_start
+                 << " to " << (void*)toksrcmfil_nextpage);
+  toksrcmfil_start=nullptr;
+  toksrcmfil_line=nullptr;
+  toksrcmfil_end=nullptr;
+  toksrcmfil_nextpage=nullptr;
+};      // end Rps_MemoryFileTokenSource::~Rps_MemoryFileTokenSource
+
+bool
+Rps_MemoryFileTokenSource::get_line(void)
+{
+#warning unimplemented Rps_MemoryFileTokenSource::get_line
+  RPS_FATALOUT("unimplemented Rps_MemoryFileTokenSource::get_line " << *this);
+  return false;
+} // end Rps_MemoryFileTokenSource::get_line
+
+
+void
+Rps_MemoryFileTokenSource::output(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+#warning incomplete Rps_MemoryFileTokenSource::output
+  out << "Rps_MemoryFileTokenSource@" << (void*)this
+      << "(" << Rps_Cjson_String(name()) << ")"
+      << " path:" << Rps_Cjson_String(toksrcmfil_path)
+      // << " offset:" <<
+      << std::endl;
+} // end Rps_MemoryFileTokenSource::output
+
+void
+Rps_MemoryFileTokenSource::display(std::ostream&out) const
+{
+  output(out, 0, Rps_Value::debug_maxdepth);
+  out << std::endl;
+  display_current_line_with_cursor(out);
+} // end Rps_MemoryFileTokenSource::display
 
 
 

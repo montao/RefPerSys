@@ -5,7 +5,8 @@
  * Description:
  *      This file is part of the Reflective Persistent System.
  *
- *      It has the Read-Eval-Print-Loop code using GNU readline
+ *      It has the Read-Eval-Print-Loop code but don't use GNU readline
+ *      anymore in Feb. 2024 (after commit 5b20c981b9e)
  *
  * Author(s):
  *      Basile Starynkevitch <basile@starynkevitch.net>
@@ -32,11 +33,7 @@
 
 #include "refpersys.hh"
 
-// comment for our do-scan-pkgconfig.c utility
-//@@PKGCONFIG readline
 
-#include "readline/readline.h"
-#include "readline/history.h"
 #include "wordexp.h"
 
 extern "C" const char rps_repl_gitid[];
@@ -44,6 +41,9 @@ const char rps_repl_gitid[]= RPS_GITID;
 
 extern "C" const char rps_repl_date[];
 const char rps_repl_date[]= __DATE__;
+
+extern "C" const char rps_repl_shortgitid[];
+const char rps_repl_shortgitid[]= RPS_SHORTGITID;
 
 
 std::vector<std::string> rps_completion_vect;
@@ -734,227 +734,695 @@ Rps_LexTokenZone::less(Rps_ZoneValue const&zv) const
 ////////////////////////////////////////////////////////////////
 
 
+/// TODO: in commit 5a785d82c41da of May 16, 2024 all the builtin
+/// commands are similarily implemented, the hope is this handwritten
+/// C++ code to be soon and easily generated from new RefPerSys
+/// objects....
 
-//§ char **
-//§ rpsrepl_name_or_oid_completion(const char *text, int start, int end)
-//§ {
-//§   /* Notice that the start and end are byte indexes, and that matters
-//§    *  with UTF-8.  But they are indexes in the current line, while text
-//§    *  is what should be completed... */
-//§   RPS_DEBUG_LOG(COMPL_REPL, "text='" << text << "' start=" << start
-//§                 << ", end=" << end
-//§                 << std::endl
-//§                 << RPS_FULL_BACKTRACE_HERE(1, "rpsrepl_name_or_oid_completion"));
-//§   rps_completion_vect.clear();
-//§   std::string prefix;
-//§   int nbmatch = 0;
-//§   // for objid, we require four characters including the leading
-//§   // underscore to autocomplete...
-//§   if (end>start+4 && text[0] == '_' && isdigit(text[1])
-//§       && isalnum(text[2]) && isalnum(text[3]))
-//§     {
-//§       prefix.assign(text, end-start);
-//§       RPS_DEBUG_LOG(COMPL_REPL, "oid autocomplete prefix='" << prefix << "'");
-//§       // use oid autocompletion, with
-//§       // Rps_ObjectZone::autocomplete_oid...
-//§       nbmatch = Rps_ObjectZone::autocomplete_oid
-//§                 (prefix.c_str(),
-//§                  [&] (const Rps_ObjectZone* obz)
-//§       {
-//§         RPS_ASSERT(obz != nullptr);
-//§         Rps_Id oid = obz->oid();
-//§         RPS_DEBUG_LOG(COMPL_REPL, "oid autocomplete oid=" << oid
-//§                       << " for prefix='" << prefix << "'"
-//§                       << std::endl
-//§                       << RPS_FULL_BACKTRACE_HERE(1, "autocomploid/rpsrepl_name_or_oid_completion"));
-//§         rps_completion_vect.push_back(oid.to_string());
-//§         return false;
-//§       });
-//§       RPS_DEBUG_LOG(COMPL_REPL, "oid autocomplete prefix='" << prefix << "' -> nbmatch=" << nbmatch);
-//§     }
-//§   // for names, we require two characters to autocomplete
-//§   else if (end>start+2 && isalpha(text[0]) && (isalnum(text[1]) || text[1]=='_'))
-//§     {
-//§       // use symbol name autocompletion, with
-//§       // Rps_PayloadSymbol::autocomplete_name...
-//§       prefix.assign(text, end-start);
-//§       RPS_DEBUG_LOG(COMPL_REPL, "name autocomplete prefix='" << prefix << "'");
-//§       nbmatch =  Rps_PayloadSymbol::autocomplete_name
-//§                  (prefix.c_str(),
-//§                   [&] (const Rps_ObjectZone*obz, const std::string&name)
-//§       {
-//§         RPS_ASSERT(obz != nullptr);
-//§         RPS_DEBUG_LOG(COMPL_REPL, "symbol autocomplete name='" << name
-//§                       << "', obz:" << Rps_ObjectRef(obz)
-//§                       << " for prefix='" << prefix << "'"
-//§                       << std::endl
-//§                       << RPS_FULL_BACKTRACE_HERE(1, "autocomplname/rpsrepl_name_or_oid_completion"));
-//§         rps_completion_vect.push_back(name);
-//§         return false;
-//§       });
-//§       RPS_DEBUG_LOG(COMPL_REPL, "name autocomplete prefix='" << prefix << "' -> nbmatch=" << nbmatch);
-//§     }
-//§   else
-//§     RPS_DEBUG_LOG(COMPL_REPL, "no autocomplete prefix='" << prefix << "'"
-//§                   << " text='" << text << "' start=" << start << " end=" << end);
-//§   //
-//§   RPS_DEBUG_LOG(COMPL_REPL, "autocomplete rps_completion_vect nbmatch=" << nbmatch << "rps_completion_vect: siz#" << rps_completion_vect.size()
-//§                 << Rps_Do_Output([&](std::ostream& out)
-//§   {
-//§     int ix=0;
-//§     for (auto str: rps_completion_vect)
-//§       {
-//§         if (ix % 4 == 0)
-//§           out << std::endl << "...";
-//§         out << " [" << ix << "]::'" << str<< "'";
-//§         ix++;
-//§       }
-//§   })
-//§       << std::endl
-//§       << RPS_FULL_BACKTRACE_HERE(1, "rpsrepl_name_or_oid_completion-autocomplete"));
-//§   if (nbmatch==0)
-//§     return nullptr;
-//§   else
-//§     {
-//§       rl_attempted_completion_over = 1;
-//§       RPS_DEBUG_LOG(COMPL_REPL, "rpsrepl_name_or_oid_completion nbmatch=" << nbmatch
-//§                     << " text='" << text << "' start=" << start
-//§                     << " end='" << end);
-//§       return rl_completion_matches(text, rpsrepl_name_or_oid_generator);
-//§     }
-//§ } // end rpsrepl_name_or_oid_completion
-//§
-//§
-//§
-//§ char *
-//§ rpsrepl_name_or_oid_generator(const char *text, int state)
-//§ {
-//§   /// the initial state is 0....
-//§   RPS_DEBUG_LOG(COMPL_REPL, "text='" << text << "' state#" << state << " rps_completion_vect.size="
-//§                 << rps_completion_vect.size()
-//§                 << Rps_Do_Output([&](std::ostream& outs)
-//§   {
-//§     int cix=0;
-//§     for (auto curcomp: rps_completion_vect)
-//§       {
-//§         if (cix % 4 == 0) outs << std::endl;
-//§         outs << "completion[" << cix << "]==" << curcomp;
-//§         cix++;
-//§       }
-//§   })
-//§       << std::endl
-//§       << RPS_FULL_BACKTRACE_HERE(1, "rpsrepl_name_or_oid_generator"));
-//§   if (rps_completion_vect.size() == 1)
-//§     {
-//§       if (state==0)
-//§         return strdup(rps_completion_vect[0].c_str());
-//§       else
-//§         return nullptr;
-//§     }
-//§   RPS_WARNOUT("rpsrepl_name_or_oid_generator incomplete text=='" << text << "' state#" << state
-//§               << " with " <<rps_completion_vect.size() << " completions");
-//§ #warning rpsrepl_name_or_oid_generator incomplete...
-//§   return nullptr;
-//§ } // end rpsrepl_name_or_oid_generator
+void
+rps_repl_builtin_shell_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                               Rps_TokenSource& intoksrc,
+                               const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  RPS_INFORMOUT(std::endl << "running shell command " <<  Rps_QuotedC_String(intoksrc.curcptr()));
+  fflush(nullptr);
+  int ret = system(intoksrc.curcptr());
+  if (ret == 0)
+    RPS_INFORMOUT("successful shell command " <<  Rps_QuotedC_String(intoksrc.curcptr()));
+  else
+    RPS_WARNOUT("failed shell command " << Rps_QuotedC_String(intoksrc.curcptr()) << " exited " << ret);
+} // end rps_repl_builtin_shell_command
+
+void
+rps_repl_builtin_sh_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                            Rps_TokenSource& intoksrc,
+                            const char*title)
+{
+  rps_repl_builtin_shell_command(callframe, obenvarg, builtincmd, intoksrc, title);
+} // end rps_repl_builtin_sh_command
+
+void
+rps_repl_builtin_pwd_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                             Rps_TokenSource& intoksrc,
+                             const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  char cwdbuf[rps_path_byte_size+4];
+  memset(cwdbuf, 0, sizeof(cwdbuf));
+  char*cwd = getcwd(cwdbuf, rps_path_byte_size);
+  if (cwd)
+    RPS_INFORMOUT(std::endl << "working directory is " <<  cwdbuf);
+  else
+    RPS_WARNOUT("failed getcwd " << strerror(errno));
+  fflush(nullptr);
+} // end rps_repl_builtin_pwd_command
 
 
+void
+rps_repl_builtin_cd_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                            Rps_TokenSource& intoksrc,
+                            const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  char cwdbuf[rps_path_byte_size+4];
+  memset(cwdbuf, 0, sizeof(cwdbuf));
+  wordexp_t wx;
+  memset(&wx, 0, sizeof(wx));
+  char*cwd = getcwd(cwdbuf, rps_path_byte_size);
+  if (cwd)
+    RPS_INFORMOUT(std::endl << "old working directory is " <<  cwdbuf);
+  else
+    RPS_WARNOUT("failed getcwd " << strerror(errno));
+  const char*cp = intoksrc.curcptr();
+  while (cp && isspace(*cp))
+    cp++;
+  if (!cp)
+    RPS_WARNOUT("no path given to !cd builtin");
+  else
+    {
+      int failexp = wordexp(cp, &wx, WRDE_SHOWERR|WRDE_UNDEF);
+      if (failexp)
+        RPS_WARNOUT("!cd builtin failed to expand " << cp
+                    << ((failexp==WRDE_BADCHAR)?": bad char"
+                        : (failexp==WRDE_BADVAL)?": bad shell var"
+                        : (failexp==WRDE_NOSPACE)?": out of memory"
+                        : (failexp==WRDE_SYNTAX)?": shell syntax error"
+                        : ": other wordexp failure"));
+      if (wx.we_wordc == 0)
+        RPS_WARNOUT("!cd builtin cannot expand " << cp);
+      else if (wx.we_wordc > 1)
+        RPS_WARNOUT("!cd builtin ambiguous expand " << cp << " to "
+                    << wx.we_wordv[0] << " and " << wx.we_wordv[1]
+                    << ((wx.we_wordc > 2)?" etc.":""));
+      else
+        {
+          if (chdir(wx.we_wordv[0]))
+            {
+              const char*err = strerror(errno);
+              RPS_WARNOUT("!cd " << cp << " failed to chdir to " << wx.we_wordv[0] << " :" << err);
+            }
+          else
+            {
+              char*cwd = getcwd(cwdbuf, rps_path_byte_size);
+              if (cwd)
+                RPS_INFORMOUT(std::endl << "!cd " << cp << " changed to new working directory " <<  cwdbuf);
+              else
+                RPS_WARNOUT("failed getcwd " << strerror(errno));
+            }
+        };
+      wordfree(&wx);
+    }
+} // end rps_repl_builtin_cd_command
+
+void
+rps_repl_builtin_pid_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                             Rps_TokenSource& intoksrc,
+                             const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  RPS_INFORMOUT(std::endl << "process id is " <<  (int)getpid() << " on " << rps_hostname());
+  fflush(nullptr);
+} // end rps_repl_builtin_pid_command
+
+void
+rps_repl_builtin_getpid_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                Rps_TokenSource& intoksrc,
+                                const char*title)
+{
+  rps_repl_builtin_pid_command(callframe, obenvarg, builtincmd, intoksrc, title);
+} // end rps_repl_builtin_getpid_command
+
+void
+rps_repl_builtin_git_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                             Rps_TokenSource& intoksrc,
+                             const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  RPS_INFORMOUT(std::endl << "gitid:" << rps_gitid
+                << std::endl << "topdir:" << rps_topdirectory);
+  fflush(nullptr);
+} // end rps_repl_builtin_git_command
 
 
-//§ void
-//§ rps_read_eval_print_loop(int &argc, char **argv)
-//§ {
-//§   RPS_LOCALFRAME(/*descr:*/RPS_CALL_FRAME_UNDESCRIBED,
-//§                            /*callerframe:*/RPS_NULL_CALL_FRAME,
-//§                            Rps_Value lextokv;
-//§                            Rps_Value lexval;
-//§                            Rps_ObjectRef cmdob;
-//§                            Rps_Value cmdparserv;
-//§                            Rps_Value parsmainv;
-//§                            Rps_Value parsextrav;
-//§                 );
-//§   for (int ix=0; ix<argc; ix++)
-//§     RPS_DEBUG_LOG(REPL, "REPL arg [" << ix << "]: " << argv[ix]);
-//§   RPS_ASSERT(rps_is_main_thread());
-//§   RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop start frame=" << Rps_ShowCallFrame(&_));
-//§   int count=0;
-//§   rl_attempted_completion_function = rpsrepl_name_or_oid_completion;
-//§   Rps_ReadlineTokenSource rltoksrc("_-_");
-//§   while (!rps_repl_stopped)
-//§     {
-//§       char prompt[32];
-//§       memset(prompt, 0, sizeof(prompt));
-//§       count++;
-//§       snprintf(prompt, sizeof(prompt), "Rps_REPL#%d: ", count);
-//§       rltoksrc.set_prompt(prompt);
-//§       RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop command count#" << count);
-//§       if (count % 4 == 0)
-//§         usleep(128*1024);
-//§       if (!rltoksrc.get_line())
-//§         break;
-//§       std::string commandpos = rltoksrc.position_str();
-//§       RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop count#" << count
-//§                     << " commandpos=" << commandpos
-//§                     << " current_line='"
-//§                     << Rps_Cjson_String(rltoksrc.current_line()) << "'");
-//§       _f.lextokv = rltoksrc.get_token(&_);
-//§       RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop got lextokv=" << _f.lextokv << " pos=" << rltoksrc.position_str());
-//§       if (!_f.lextokv)
-//§         break;
-//§       const Rps_LexTokenZone* lextokz = _f.lextokv.as_lextoken();
-//§       RPS_ASSERT(lextokz);
-//§       if (lextokz->lxkind()
-//§           != RPS_ROOT_OB(_5yhJGgxLwLp00X0xEQ))  //object∈class
-//§         {
-//§           RPS_WARNOUT("rps_read_eval_print_loop command at "
-//§                       << commandpos << std::endl
-//§                       << "Should start with an object but got "
-//§                       << _f.lextokv);
-//§           continue;
-//§         }
-//§       _f.lexval = lextokz->lxval();
-//§       RPS_ASSERT(_f.lexval.is_object());
-//§       _f.cmdob = _f.lexval.as_object();
-//§       RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop cmdob=" << _f.cmdob
-//§                     << " at " << commandpos);
-//§       if (_f.lexval.is_instance_of(&_,RPS_ROOT_OB(_8CncrUdoSL303T5lOK)))   //repl_command∈class
-//§         {
-//§           _f.cmdparserv = _f.cmdob
-//§                           ->get_attr1(&_,RPS_ROOT_OB(_4I8GwXXfO3P01cdzyd)); //repl_command_parser∈symbol
-//§           RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop cmdob=" << _f.cmdob
-//§                         << " is repl_command of repl_command_parser: " << _f.cmdparserv
-//§                         << " lextokv=" << _f.lextokv);
-//§           if (_f.cmdparserv.is_closure())
-//§             {
-//§               Rps_TwoValues parspair = Rps_ClosureValue(_f.cmdparserv.to_closure()).apply2 (&_, _f.cmdob, _f.lextokv);
-//§               _f.parsmainv = parspair.main();
-//§               _f.parsextrav = parspair.xtra();
-//§               RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop applied " << _f.cmdparserv << " to "
-//§                             << _f.cmdob
-//§                             << " and got parsmainv:" << _f.parsmainv << ", parsextrav=" << _f.parsextrav
-//§                             << " now position is " <<  rltoksrc.position_str());
-//§               if (!_f.parsmainv && !_f.parsextrav)
-//§                 RPS_WARNOUT("rps_read_eval_print_loop: REPL command " << _f.cmdob << " at " << commandpos << " failed using "
-//§                             << _f.cmdparserv << std::endl);
-//§               continue;
-//§             }
-//§           else
-//§             {
-//§               RPS_WARNOUT("rps_read_eval_print_loop: REPL command " << _f.cmdob << " has a bad command parser " << _f.cmdparserv
-//§                           << " after " << _f.lexval);
-//§               continue;
-//§             }
-//§           RPS_DEBUG_LOG(REPL, "rps_read_eval_print_loop at  " << commandpos << " count#" << count <<  " pos=" << rltoksrc.position_str());
-//§         }
-//§       else
-//§         {
-//§           RPS_WARNOUT("rps_read_eval_print_loop: REPL command unexpected token " <<  _f.lextokv << " at " << commandpos << " now at " << rltoksrc.position_str());
-//§           continue;
-//§         }
-//§     };
-//§   RPS_INFORMOUT("rps_read_eval_print_loop ending count#" << count << " at " << rltoksrc.position_str());
-//§ } // end of rps_read_eval_print_loop
+void
+rps_repl_builtin_pmap_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                              Rps_TokenSource& intoksrc,
+                              const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  char pmapbuf[64];
+  memset (pmapbuf, 0, sizeof(pmapbuf));
+  fflush(nullptr);
+  snprintf(pmapbuf, sizeof(pmapbuf)-2, "/usr/bin/pmap %d", (int)getpid());
+  if (system(pmapbuf))
+    RPS_WARNOUT("failed running " << pmapbuf << ":" << strerror(errno));
+} // end rps_repl_builtin_pmap_command
 
 
+
+void
+rps_repl_builtin_pfd_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                             Rps_TokenSource& intoksrc,
+                             const char*title)
+{
+  char pfdbuf[64];
+  char pathbuf[rps_path_byte_size];
+  char entbuf[rps_path_byte_size];
+  std::map<int, std::string> fdmap;
+  memset (pfdbuf, 0, sizeof(pfdbuf));
+  memset (entbuf, 0, sizeof(entbuf));
+  memset (pathbuf, 0, sizeof(pathbuf));
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  snprintf (pfdbuf, sizeof(pfdbuf), "/proc/%d/fd/", (int)getpid());
+  DIR* pfdir = opendir(pfdbuf);
+  struct dirent* de= nullptr;
+  if (!pfdir)
+    {
+      RPS_WARNOUT("failed opendir " << pfdbuf << ":" << strerror(errno));
+      return;
+    };
+  RPS_POSSIBLE_BREAKPOINT();
+  for (de=readdir(pfdir); de!=nullptr; de=readdir(pfdir))
+    {
+      if (!isdigit(de->d_name[0]))
+        continue;
+      int fdnum = atoi(de->d_name);
+      if (de->d_type == DT_LNK)
+        {
+          memset (pathbuf, 0, sizeof(pathbuf));
+          snprintf(pathbuf, sizeof(pathbuf), "/proc/%d/fd/%d", (int)getpid(), fdnum);
+          if (strlen(pathbuf) >= sizeof(pathbuf)-2)
+            continue;
+          if (readlink(pathbuf, entbuf, sizeof(entbuf))<0)
+            continue;
+          std::string entstr;
+          entstr.assign(entbuf);
+          fdmap.insert({fdnum,entstr});
+        };
+    }
+  closedir(pfdir), pfdir = nullptr;
+  RPS_POSSIBLE_BREAKPOINT();
+  RPS_INFORMOUT(std::endl << fdmap.size() << " file descriptors:");
+  for (auto it: fdmap)
+    {
+      RPS_POSSIBLE_BREAKPOINT();
+      std::cout << it.first << ":" << it.second << std::endl;
+    }
+  RPS_POSSIBLE_BREAKPOINT();
+} // end rps_repl_builtin_pfd_command
+
+
+
+void
+rps_repl_builtin_time_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                              Rps_TokenSource& intoksrc,
+                              const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  RPS_INFORMOUT(std::endl << "elapsed time (seconds): " <<  rps_elapsed_real_time()
+                << ", cpu time: " << rps_process_cpu_time());
+} // end rps_repl_builtin_time_command
+
+
+void
+rps_repl_builtin_gc_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                            Rps_TokenSource& intoksrc,
+                            const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  std::function<void(Rps_GarbageCollector*)> markall = [&](Rps_GarbageCollector*gc)
+  {
+    for (Rps_CallFrame* cf = &_; cf != nullptr; cf = cf->previous_call_frame())
+      cf->gc_mark_frame(gc);
+  };
+  rps_garbage_collect(&markall);
+} // end rps_repl_builtin_gc_command
+
+
+void
+rps_repl_builtin_typeinfo_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                  Rps_TokenSource& intoksrc,
+                                  const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  rps_print_types_info();
+} // end rps_repl_builtin_typeinfo_command
+
+
+
+void
+rps_repl_builtin_version_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                 Rps_TokenSource& intoksrc,
+                                 const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                );
+  _f.obenv = obenvarg;
+  rps_show_version();
+} // end rps_repl_builtin_version_command
+
+
+
+void
+rps_repl_builtin_env_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                             Rps_TokenSource& intoksrc,
+                             const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                );
+  _f.obenv = obenvarg;
+  auto paylenv = _f.obenv->get_dynamic_payload< Rps_PayloadEnvironment>();
+  RPS_INFORMOUT(std::endl << "environment object is " << _f.obenv
+                << Rps_Do_Output([&](std::ostream&outs)
+  {
+    if (paylenv)
+      {
+        outs << " with parent environment:" << paylenv->get_parent_environment() << std::endl;
+        _f.descrv = paylenv->get_descr();
+        if (_f.descrv)
+          outs << "descriptor:" << _f.descrv << std::endl;
+        std::function<bool(Rps_CallFrame*,Rps_ObjectRef,Rps_Value,void*)> outfun
+          = [&](Rps_CallFrame*cf,Rps_ObjectRef obvar,Rps_Value value,void*d)
+        {
+          outs << "*" << obvar << "::" << value << std::endl;
+          RPS_ASSERT(d == nullptr);
+          return false;
+        };
+        paylenv->do_each_entry(&_, outfun);
+      }
+    else
+      outs << " [without environment payload]";
+  })
+      << std::endl);
+  rps_show_version();
+} // end rps_repl_builtin_env_command
+
+
+
+
+void
+rps_repl_builtin_parse_expression_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+    Rps_TokenSource& intoksrc,
+    const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_expression_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_expression_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_expression(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_expression " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_expression " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_expression_command
+
+void
+rps_repl_builtin_parse_expr_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                    Rps_TokenSource& intoksrc,
+                                    const char*title)
+{
+  rps_repl_builtin_parse_expression_command(callframe, obenvarg, builtincmd, intoksrc, title);
+} // end rps_repl_builtin_parse_expr_command
+
+void
+rps_repl_builtin_parse_disjunction_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+    Rps_TokenSource& intoksrc,
+    const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_disjunction_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_disjunction_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_disjunction(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_disjunction " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_disjunction " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_disjunction_command
+
+
+void
+rps_repl_builtin_parse_disj_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                    Rps_TokenSource& intoksrc,
+                                    const char*title)
+{
+  rps_repl_builtin_parse_disjunction_command(callframe, obenvarg, builtincmd, intoksrc, title);
+} // end rps_repl_builtin_parse_disj_command
+
+
+void
+rps_repl_builtin_parse_conjunction_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+    Rps_TokenSource& intoksrc,
+    const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_conjunction_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_conjunction_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_conjunction(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_conj " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_conjunction " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_conjunction_command
+
+
+void
+rps_repl_builtin_parse_conj_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                    Rps_TokenSource& intoksrc,
+                                    const char*title)
+{
+  rps_repl_builtin_parse_conjunction_command(callframe, obenvarg, builtincmd, intoksrc, title);
+} // end rps_repl_builtin_parse_conj_command
+
+
+
+void
+rps_repl_builtin_parse_comparison_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+    Rps_TokenSource& intoksrc,
+    const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_comparison_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_comparison_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_comparison(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_comparison " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_comparison " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_comparison_command
+
+void
+rps_repl_builtin_parse_comparand_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+    Rps_TokenSource& intoksrc,
+    const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_comparand_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_comparand_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_comparand(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_comparand " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_comparand " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_comparand_command
+
+
+
+void
+rps_repl_builtin_parse_sum_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                   Rps_TokenSource& intoksrc,
+                                   const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_sum_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_sum_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_sum(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_sum " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_sum " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_sum_command
+
+
+
+void
+rps_repl_builtin_parse_product_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                       Rps_TokenSource& intoksrc,
+                                       const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_product_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_product_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_product(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_product " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_product " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_product_command
+
+
+void
+rps_repl_builtin_parse_factor_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                      Rps_TokenSource& intoksrc,
+                                      const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_factor_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_factor_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_factor(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_factor " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_factor " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_factor_command
+
+
+void
+rps_repl_builtin_parse_term_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                    Rps_TokenSource& intoksrc,
+                                    const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_term_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_term_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_term(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_term " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_term " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_term_command
+
+
+void
+rps_repl_builtin_parse_primary_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
+                                       Rps_TokenSource& intoksrc,
+                                       const char*title)
+{
+  RPS_LOCALFRAME(RPS_CALL_FRAME_UNDESCRIBED,
+                 /*callerframe:*/callframe,
+                 Rps_ObjectRef obenv;
+                 Rps_Value descrv;
+                 Rps_Value parvalv;
+                );
+  const char*cp = intoksrc.curcptr();
+  _f.obenv = obenvarg;
+  bool ok= false;
+  RPS_DEBUG_LOG(REPL, "rps_repl_builtin_parse_primary_command " << title
+                << "... intoksrc:" << intoksrc << " obenv=" << _f.obenv
+                << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
+                << std::endl
+                <<  RPS_FULL_BACKTRACE_HERE(1, "rps_repl_builtin_parse_primary_command")
+                << std::endl
+                << Rps_Do_Output([&](std::ostream& out)
+  {
+    intoksrc.display_current_line_with_cursor(out);
+  })
+      << std::endl);
+  _f.parvalv = intoksrc.parse_primary(&_, &ok);
+  if (ok)
+    RPS_INFORMOUT(std::endl << " parse_primary " << cp << " as " << _f.parvalv);
+  else
+    RPS_WARNOUT("failed parse_primary " << cp << " in " << intoksrc);
+} // end rps_repl_builtin_parse_primary_command
+
+////////////////////////////////////////////////////////////////
 
 void
 rps_do_builtin_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const char*builtincmd,
@@ -973,256 +1441,113 @@ rps_do_builtin_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, con
   RPS_DEBUG_LOG(REPL, "rps_do_builtin_repl_command " << title
                 << "... intoksrc:" << intoksrc << " BUILTIN " << builtincmd
                 << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr()));
-  if (!strcmp(builtincmd, "sh") || !strcmp(builtincmd, "shell"))
+  if (!strcmp(builtincmd, "sh"))
     {
-      RPS_INFORMOUT(std::endl << "running shell command " <<  Rps_QuotedC_String(intoksrc.curcptr()));
-      fflush(nullptr);
-      int ret = system(intoksrc.curcptr());
-      if (ret == 0)
-        RPS_INFORMOUT("successful shell command " <<  Rps_QuotedC_String(intoksrc.curcptr()));
-      else
-        RPS_WARNOUT("failed shell command " << Rps_QuotedC_String(intoksrc.curcptr()) << " exited " << ret);
+      rps_repl_builtin_sh_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "shell"))
+    {
+      rps_repl_builtin_shell_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "pwd"))
     {
-      char cwdbuf[rps_path_byte_size+4];
-      memset(cwdbuf, 0, sizeof(cwdbuf));
-      char*cwd = getcwd(cwdbuf, rps_path_byte_size);
-      if (cwd)
-        RPS_INFORMOUT(std::endl << "working directory is " <<  cwdbuf);
-      else
-        RPS_WARNOUT("failed getcwd " << strerror(errno));
-      fflush(nullptr);
+      rps_repl_builtin_pwd_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "cd"))
     {
-      char cwdbuf[rps_path_byte_size+4];
-      memset(cwdbuf, 0, sizeof(cwdbuf));
-      wordexp_t wx;
-      memset(&wx, 0, sizeof(wx));
-      char*cwd = getcwd(cwdbuf, rps_path_byte_size);
-      if (cwd)
-        RPS_INFORMOUT(std::endl << "old working directory is " <<  cwdbuf);
-      else
-        RPS_WARNOUT("failed getcwd " << strerror(errno));
-      const char*cp = intoksrc.curcptr();
-      while (cp && isspace(*cp))
-        cp++;
-      if (!cp)
-        RPS_WARNOUT("no path given to !cd builtin");
-      else
-        {
-          int failexp = wordexp(cp, &wx, WRDE_SHOWERR|WRDE_UNDEF);
-          if (failexp)
-            RPS_WARNOUT("!cd builtin failed to expand " << cp
-                        << ((failexp==WRDE_BADCHAR)?": bad char"
-                            : (failexp==WRDE_BADVAL)?": bad shell var"
-                            : (failexp==WRDE_NOSPACE)?": out of memory"
-                            : (failexp==WRDE_SYNTAX)?": shell syntax error"
-                            : ": other wordexp failure"));
-          if (wx.we_wordc == 0)
-            RPS_WARNOUT("!cd builtin cannot expand " << cp);
-          else if (wx.we_wordc > 1)
-            RPS_WARNOUT("!cd builtin ambiguous expand " << cp << " to "
-                        << wx.we_wordv[0] << " and " << wx.we_wordv[1]
-                        << ((wx.we_wordc > 2)?" etc.":""));
-          else
-            {
-              if (chdir(wx.we_wordv[0]))
-                {
-                  const char*err = strerror(errno);
-                  RPS_WARNOUT("!cd " << cp << " failed to chdir to " << wx.we_wordv[0] << " :" << err);
-                }
-              else
-                {
-                  char*cwd = getcwd(cwdbuf, rps_path_byte_size);
-                  if (cwd)
-                    RPS_INFORMOUT(std::endl << "!cd " << cp << " changed to new working directory " <<  cwdbuf);
-                  else
-                    RPS_WARNOUT("failed getcwd " << strerror(errno));
-                }
-            };
-          wordfree(&wx);
-        }
+      rps_repl_builtin_cd_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
-  else if (!strcmp(builtincmd, "pid") || !strcmp(builtincmd, "getpid"))
+  else if (!strcmp(builtincmd, "pid"))
     {
-      RPS_INFORMOUT(std::endl << "process id is " <<  (int)getpid() << " on " << rps_hostname());
-      fflush(nullptr);
+      rps_repl_builtin_pid_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "getpid"))
+    {
+      rps_repl_builtin_getpid_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "git"))
     {
-      RPS_INFORMOUT(std::endl << "gitid:" << rps_gitid
-                    << std::endl << "topdir:" << rps_topdirectory);
-      fflush(nullptr);
-    }
-  else if (!strcmp(builtincmd, "pmap"))
-    {
-      char pmapbuf[64];
-      memset (pmapbuf, 0, sizeof(pmapbuf));
-      fflush(nullptr);
-      snprintf(pmapbuf, sizeof(pmapbuf)-2, "/usr/bin/pmap %d", (int)getpid());
-      if (system(pmapbuf))
-        RPS_WARNOUT("failed running " << pmapbuf << ":" << strerror(errno));
+      rps_repl_builtin_git_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "time"))
     {
-      RPS_INFORMOUT(std::endl << "elapsed time (seconds): " <<  rps_elapsed_real_time()
-                    << ", cpu time: " << rps_process_cpu_time());
+      rps_repl_builtin_time_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "gc"))
     {
-      std::function<void(Rps_GarbageCollector*)> markall = [&](Rps_GarbageCollector*gc)
-      {
-        for (Rps_CallFrame* cf = &_; cf != nullptr; cf = cf->previous_call_frame())
-          cf->gc_mark_frame(gc);
-      };
-      rps_garbage_collect(&markall);
+      rps_repl_builtin_gc_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "typeinfo"))
     {
-      rps_print_types_info();
+      rps_repl_builtin_typeinfo_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "version"))
     {
-      rps_show_version();
+      rps_repl_builtin_version_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else if (!strcmp(builtincmd, "env"))
     {
-      auto paylenv = _f.obenv->get_dynamic_payload< Rps_PayloadEnvironment>();
-      RPS_INFORMOUT(std::endl << "environment object is " << _f.obenv
-                    << Rps_Do_Output([&](std::ostream&outs)
-      {
-        if (paylenv)
-          {
-            outs << " with parent environment:" << paylenv->get_parent_environment() << std::endl;
-            _f.descrv = paylenv->get_descr();
-            if (_f.descrv)
-              outs << "descriptor:" << _f.descrv << std::endl;
-            std::function<bool(Rps_CallFrame*,Rps_ObjectRef,Rps_Value,void*)> outfun
-              = [&](Rps_CallFrame*cf,Rps_ObjectRef obvar,Rps_Value value,void*d)
-            {
-              outs << "*" << obvar << "::" << value << std::endl;
-              RPS_ASSERT(d == nullptr);
-              return false;
-            };
-            paylenv->do_each_entry(&_, outfun);
-          }
-        else
-          outs << " [without environment payload]";
-      })
-          << std::endl);
+      rps_repl_builtin_env_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
-  //// testing the parsers
-  else if (!strncmp(builtincmd, "parse_", sizeof("parse_")-1))
+  else if (!strcmp(builtincmd, "parse_expression"))
     {
-      bool ok= false;
-      const char*cp = intoksrc.curcptr();
-
-      RPS_DEBUG_LOG(REPL, "rps_do_builtin_repl_command " << title
-                    << "... intoksrc:" << intoksrc << " ParsingBUILTIN "
-                    << builtincmd << " obenv=" << _f.obenv
-                    << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())
-                    << std::endl
-                    <<  RPS_FULL_BACKTRACE_HERE(1, "rps_do_builtin_repl_command/Parsing-builtin")
-                    << std::endl
-                    << Rps_Do_Output([&](std::ostream& out)
-      {
-        intoksrc.display_current_line_with_cursor(out);
-      })
-          << std::endl);
-      if (!strcmp(builtincmd, "parse_expression") || !strcmp(builtincmd, "parse_expr"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_expression(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_expression " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_expression " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_disjunction") || !strcmp(builtincmd, "parse_disj"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_disjunction(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_disjunction " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_disjunction " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_conjunction") || !strcmp(builtincmd, "parse_conj"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_conjunction(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_conjunction " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_conjunction " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_comparison"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_comparison(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_comparison " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_comparison " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_comparand"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_comparand(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_comparand " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_comparand " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_sum"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_sum(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_sum " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_sum " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_product"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_product(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_product " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_product " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_factor"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_factor(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_factor " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_factor " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_term"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_term(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_term " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_term " << cp << " in " << intoksrc);
-        }
-      else if (!strcmp(builtincmd, "parse_primary"))
-        {
-          bool ok= false;
-          _f.parvalv = intoksrc.parse_primary(&_, &ok);
-          if (ok)
-            RPS_INFORMOUT(std::endl << " parse_primary " << cp << " as " << _f.parvalv);
-          else
-            RPS_WARNOUT("failed parse_primary " << cp << " in " << intoksrc);
-        }
-      else
-        RPS_WARNOUT("unknown parsing command " << builtincmd << " in " << intoksrc);
+      rps_repl_builtin_parse_expression_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_expr"))
+    {
+      rps_repl_builtin_parse_expr_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_disjunction"))
+    {
+      rps_repl_builtin_parse_disjunction_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_disj"))
+    {
+      rps_repl_builtin_parse_disj_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_conj"))
+    {
+      rps_repl_builtin_parse_conj_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_conjunction"))
+    {
+      rps_repl_builtin_parse_conjunction_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_comparison"))
+    {
+      rps_repl_builtin_parse_comparison_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_comparand"))
+    {
+      rps_repl_builtin_parse_comparand_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_sum"))
+    {
+      rps_repl_builtin_parse_sum_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_product"))
+    {
+      rps_repl_builtin_parse_product_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_factor"))
+    {
+      rps_repl_builtin_parse_factor_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_term"))
+    {
+      rps_repl_builtin_parse_term_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "parse_primary"))
+    {
+      rps_repl_builtin_parse_primary_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "pmap"))
+    {
+      rps_repl_builtin_pmap_command(&_, _f.obenv, builtincmd, intoksrc, title);
+    }
+  else if (!strcmp(builtincmd, "pfd"))
+    {
+      rps_repl_builtin_pfd_command(&_, _f.obenv, builtincmd, intoksrc, title);
     }
   else
     RPS_WARNOUT("invalid builtin " << builtincmd << " in "
@@ -1288,12 +1613,10 @@ rps_do_one_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const s
                     << "... intoksrc:" << intoksrc << " BUILTIN " << builtincmd
                     << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr()));
       rps_do_builtin_repl_command(&_, _f.obenv, builtincmd, intoksrc, title);
-      RPS_WARNOUT("rps_do_one_repl_command: REPL command " << title
-                  << " " << _f.cmdob << " at " << commandpos << " unimplemented" << std::endl
-                  << "... builtin " << builtincmd << std::endl
-                  << "... at position " <<  intoksrc.position_str()
-                  << " curptr:" << Rps_QuotedC_String(intoksrc.curcptr()) << std::endl
-                  <<  RPS_FULL_BACKTRACE_HERE(1, "rps_do_one_repl_command/unimplemented builtin"));
+      RPS_DEBUG_LOG(REPL, "rps_do_one_repl_command " << title
+                    << Rps_Cjson_String(cmd)
+                    << "... intoksrc:" << intoksrc << " DONEBUILTIN " << builtincmd
+                    << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr()));
       return;
     }
   _f.lextokv = intoksrc.get_token(&_);
@@ -1367,12 +1690,15 @@ rps_do_one_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const s
       _f.cmdparserv = //
         _f.cmdob->get_attr1(&_,RPS_ROOT_OB(_4I8GwXXfO3P01cdzyd)); //repl_command_parser∈symbol
       RPS_DEBUG_LOG(REPL, "rps_do_one_repl_command cmdob=" << _f.cmdob
-                    << " is repl_command of repl_command_parser: " << _f.cmdparserv
+                    << " is repl_command" << std::endl
+                    << "of repl_command_parser: " << _f.cmdparserv
                     << " lextokv=" << _f.lextokv);
       if (_f.cmdparserv.is_closure())
         {
           RPS_DEBUG_LOG(REPL, "rps_do_one_repl_command cmdob=" << _f.cmdob
-                        << " before applying cmdparserv=" << _f.cmdparserv << " with lextokv=" << _f.lextokv
+                        << " before applying cmdparserv="
+                        << _f.cmdparserv  << std::endl
+                        << " with lextokv=" << _f.lextokv
                         << " command at " << commandpos
                         << " ... at position " <<  intoksrc.position_str()
                         << " curptr:" << Rps_QuotedC_String(intoksrc.curcptr()) << std::endl
@@ -1380,7 +1706,8 @@ rps_do_one_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, const s
           Rps_TwoValues parspair = Rps_ClosureValue(_f.cmdparserv.to_closure()).apply2 (&_, _f.cmdob, _f.lextokv);
           _f.parsmainv = parspair.main();
           _f.parsextrav = parspair.xtra();
-          RPS_DEBUG_LOG(REPL, "rps_do_one_repl_command applied " << _f.cmdparserv << " to cmd "
+          RPS_DEBUG_LOG(REPL, "rps_do_one_repl_command applied "
+                        << _f.cmdparserv << " to cmd "
                         << title << " "<< std::endl
                         << "... intoksrc:" << intoksrc
                         << " curcptr:" << Rps_QuotedC_String(intoksrc.curcptr())

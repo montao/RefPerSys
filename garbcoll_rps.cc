@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2020 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -38,6 +38,10 @@ const char rps_garbcoll_gitid[]= RPS_GITID;
 
 extern "C" const char rps_garbcoll_date[];
 const char rps_garbcoll_date[]= __DATE__;
+
+extern "C" const char rps_garbcoll_shortgitid[];
+const char rps_garbcoll_shortgitid[]= RPS_SHORTGITID;
+
 
 std::atomic<Rps_GarbageCollector*> Rps_GarbageCollector::gc_this_;
 std::atomic<uint64_t> Rps_GarbageCollector::gc_count_;
@@ -116,9 +120,22 @@ Rps_CallFrame::output(std::ostream&out, unsigned depth, unsigned maxdepth) const
     cfram_prev->output(out, depth+1, maxdepth);
 } // end of Rps_CallFrame::output i.e. Rps_ProtoCallFrame::output
 
+
+
+/* The top level function to call the garbage collector; the optional
+   argument C++ std::function is marking more local data, e.g. calling
+   Rps_ObjectRef::gc_mark or Rps_Value::gc_mark or some
+   Rps_GarbageCollector::mark??? routine */
 void
 rps_garbage_collect (std::function<void(Rps_GarbageCollector*)>* pfun)
 {
+#warning TODO: we might want to wait half a second in rps_garbage_collect
+  // e.g. in generated or hand-written plugins) since in some C++ code
+  // (e.g. called by graphical toolkits or numerical routines),
+  // quickly running external C++ library routines incompatible with a
+  // moving garbage collector might want to allocate some RefPerSys
+  // data but would be forbidden to run its garbage collector for a
+  // short time.
   RPS_ASSERT(Rps_GarbageCollector::gc_this_.load() == nullptr);
   Rps_GarbageCollector the_gc([=](Rps_GarbageCollector*gc)
   {
@@ -130,7 +147,8 @@ rps_garbage_collect (std::function<void(Rps_GarbageCollector*)>* pfun)
              gcnt);
   the_gc.run_gc();
   auto nbroots = the_gc.nb_roots();
-  RPS_INFORM("rps_garbage_collect completed; count#%ld, %ld roots, %ld scans, %ld marks, %ld deletions, real %.3f, cpu %.3f sec",
+  RPS_INFORM("rps_garbage_collect completed; count#%ld, %ld roots, %ld scans,"
+             " %ld marks, %ld deletions, real %.3f, cpu %.3f sec",
              gcnt, (long) nbroots, (long)(the_gc.nb_scans()),  (long)(the_gc.nb_marks()),  (long)(the_gc.nb_deletions()),
              the_gc.elapsed_time(), the_gc.process_time());
 } // end of rps_garbage_collect

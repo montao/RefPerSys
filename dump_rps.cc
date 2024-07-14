@@ -6,7 +6,7 @@
  *      This file is part of the Reflective Persistent System.
  *
  *      It has the code for dumping the persistent store, in JSON
- *      format.  See also http://json.org/ &
+ *      format, and also emit some C++ files.  See also http://json.org/ &
  *      https://github.com/open-source-parsers/jsoncpp/
  *
  * Author(s):
@@ -45,6 +45,10 @@ const char rps_dump_gitid[]= RPS_GITID;
 extern "C" const char rps_dump_date[];
 const char rps_dump_date[]= __DATE__;
 
+extern "C" const char rps_dump_shortgitid[];
+const char rps_dump_shortgitid[]= RPS_SHORTGITID;
+
+
 // comment for our do-scan-pkgconfig.c utility
 //@@PKGCONFIG jsoncpp
 
@@ -82,6 +86,7 @@ class Rps_Dumper
   std::deque<Rps_ObjectRef> du_scanque;
   std::string du_tempsuffix;
   long du_newobcount;   // counter for new dumped objects
+  bool du_is_dumping_into_topdir;
   double du_startelapsedtime;
   double du_startprocesstime;
   double du_startwallclockrealtime;
@@ -118,8 +123,12 @@ private:
   void scan_roots(void);
   Rps_ObjectRef pop_object_to_scan(void);
   void scan_loop_pass(void);
-  void scan_cplusplus_source_file_for_constants(const std::string&relfilename);
+  void add_constants_known_from_RefPerSys_system(void);
+  /// returned number of found constants
+  int scan_cplusplus_source_file_for_constants(const std::string&relfilename);
   void scan_every_cplusplus_source_file_for_constants(void);
+  void copy_one_source_file(const std::string& relsrcpath);
+  void make_source_directory(const std::string&relsrcdir);
   void write_all_space_files(void);
   void write_all_generated_files(void);
   void write_generated_roots_file(void);
@@ -135,6 +144,10 @@ private:
   void rename_opened_files(void);
   void scan_code_addr(const void*);
 public:
+  bool is_dumping_into_topdir() const
+  {
+    return du_is_dumping_into_topdir;
+  };
   std::string get_temporary_suffix(void) const
   {
     return du_tempsuffix;
@@ -173,15 +186,26 @@ public:
 };        // end class Rps_Dumper
 
 Rps_Dumper::Rps_Dumper(const std::string&topdir, Rps_CallFrame*callframe) :
-  du_topdir(topdir), du_curworkdir(), du_jsonwriterbuilder(), du_mtx(), du_mapobjects(), du_scanque(),
+  du_topdir(), du_curworkdir(), du_jsonwriterbuilder(), du_mtx(), du_mapobjects(), du_scanque(),
   du_tempsuffix(make_temporary_suffix()),
   du_newobcount(0),
+  du_is_dumping_into_topdir(false),
   du_startelapsedtime(rps_elapsed_real_time()),
   du_startprocesstime(rps_process_cpu_time()),
   du_startwallclockrealtime(rps_wallclock_real_time()),
   du_startmonotonictime(rps_monotonic_real_time()),
   du_callframe(callframe), du_openedpathset()
 {
+  {
+    char topdirpath[PATH_MAX];
+    char loadirpath[PATH_MAX];
+    memset(topdirpath, 0, sizeof(topdirpath));
+    memset(loadirpath, 0, sizeof(loadirpath));
+    char *toprealpath = realpath(topdir.c_str(), topdirpath);
+    du_topdir.assign(toprealpath);
+    char *realoadirpath = realpath(rps_topdirectory, loadirpath);
+    du_is_dumping_into_topdir = !strcmp(toprealpath, realoadirpath);
+  }
   {
     char cwdbuf[rps_path_byte_size];
     memset(cwdbuf, 0, sizeof(cwdbuf));
@@ -362,7 +386,7 @@ Rps_Dumper::open_output_file(const std::string& relpath)
 } // end Rps_Dumper::open_output_file
 
 
-void
+int
 Rps_Dumper::scan_cplusplus_source_file_for_constants(const std::string&relfilename)
 {
   int nbconst = 0;
@@ -419,8 +443,33 @@ Rps_Dumper::scan_cplusplus_source_file_for_constants(const std::string&relfilena
                   << " of " << lincnt << " lines.");
   else
     RPS_DEBUG_LOG(DUMP, "scan_cplusplus_source_file_for_constants no constants in " << fullpath);
+  return nbconst;
 } // end Rps_Dumper::scan_cplusplus_source_file_for_constants
 
+void
+Rps_Dumper::add_constants_known_from_RefPerSys_system(void)
+{
+  Rps_ObjectRef obsystem = RPS_ROOT_OB(_1Io89yIORqn02SXx4p); //RefPerSys_system∈the_system_class);
+  //RPS_ASSERT(obsystem == rpsKob_1Io89yIORqn02SXx4p);
+  std::lock_guard<std::recursive_mutex> gudump(du_mtx);
+  std::set<Rps_ObjectRef> constset;
+  std::lock_guard<std::recursive_mutex> gusystem(*obsystem->objmtxptr());
+  /// see code of rps_add_constant_object in utilities_rps.cc
+  Rps_Value oldset = obsystem->get_physical_attr
+                     (RPS_ROOT_OB(_2aNcYqKwdDR01zp0Xp)); // //"constant"∈named_attribute
+  RPS_ASSERT(oldset.is_set());
+  const Rps_SetOb* constoldset = oldset.as_set();
+  /// TODO: please code review; Basile S. consider in start of july
+  /// 2024 that in rare cases the garbage collector might move
+  /// constoldset in the below for loop.
+  for (auto it : *constoldset)
+    {
+      Rps_ObjectRef oldelem = *it;
+      RPS_ASSERT(oldelem);
+      RPS_DEBUG_LOG(DUMP, "add_constants_known_from_RefPerSys_system with oldelem=" << oldelem);
+      this->du_constantobset.insert(oldelem);
+    };
+} // end Rps_Dumper::add_constants_known_from_RefPerSys_system
 
 void
 Rps_Dumper::scan_code_addr(const void*ad)
@@ -779,7 +828,6 @@ Rps_Dumper::scan_roots(void)
     rps_dump_scan_object(this,obr);
     nbroots++;
   });
-
   RPS_DEBUG_LOG(DUMP, "dumper: scan_roots ends nbroots#" << nbroots);
 } // end Rps_Dumper::scan_roots
 
@@ -828,6 +876,8 @@ Rps_Dumper::scan_object_contents(Rps_ObjectRef obr)
 void
 Rps_Dumper::scan_every_cplusplus_source_file_for_constants(void)
 {
+  int nbscanedfiles = 0;
+  int nbtotconsts = 0;
   for (const char*const*pcurfilename = rps_files; *pcurfilename; pcurfilename++)
     {
       const char*curpath = *pcurfilename;
@@ -839,10 +889,45 @@ Rps_Dumper::scan_every_cplusplus_source_file_for_constants(void)
           || (curpath[lencurpath-2] == 'c' && curpath[lencurpath-1] == 'c'))
         {
           std::string relfilname = curpath;
-          scan_cplusplus_source_file_for_constants(relfilname);
+          nbtotconsts += scan_cplusplus_source_file_for_constants(relfilname);
+          nbscanedfiles++;
         };
-    }
+    };
+  RPS_INFORMOUT("scanned " << nbscanedfiles << " source files for constants." << std::endl
+                << "found " << nbtotconsts << " occurrences.");
 } // end of scan_every_cplusplus_source_file_for_constants
+
+void
+Rps_Dumper::copy_one_source_file(const std::string& relsrcpath)
+{
+  /// This function should copy the given relative source path,
+  /// e.g. refpersys.hh to the dump directory. It should not do
+  /// anything if the dump directory is the source one
+  /// rps_topdirectory....
+  /// See also the rps_files constant array.
+  std::lock_guard<std::recursive_mutex> gu(du_mtx);
+  if (is_dumping_into_topdir())
+    return;
+#warning unimplemented Rps_Dumper::copy_one_source_file
+  RPS_FATALOUT("unimplemented Rps_Dumper::copy_one_source_file relsrcpath="
+               << relsrcpath << " to dumpdir " << du_topdir);
+} // end Rps_Dumper::copy_one_source_file
+
+void
+Rps_Dumper::make_source_directory(const std::string& relsrcdir)
+{
+  std::lock_guard<std::recursive_mutex> gu(du_mtx);
+  /// This function should make a given source directory
+  /// e.g. refpersys.hh to the dump directory. It should not do
+  /// anything if the dump directory is the source one
+  /// rps_topdirectory....
+  /// See also the rps_subdirectories constant array.
+  if (is_dumping_into_topdir())
+    return;
+#warning unimplemented  Rps_Dumper::make_source_directory
+  RPS_FATALOUT("unimplemented Rps_Dumper::make_source_directory relsrcdir="
+               << relsrcdir << " to dumpdir " << du_topdir);
+} // end Rps_Dumper::make_source_directory
 
 void
 Rps_Dumper::write_all_space_files(void)
@@ -870,7 +955,10 @@ Rps_Dumper::write_generated_roots_file(void)
   RPS_DEBUG_LOG(DUMP, "dumper write_generated_roots_file start");
   auto rootpathstr = std::string{"generated/rps-roots.hh"};
   auto pouts = open_output_file(rootpathstr);
-  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr, "//: ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, /*path:*/rootpathstr,
+                                  /*prefix:*/ "//:", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
+  *pouts << "/// generated by write_generated_roots_file from " << __FILE__ << ":" << __LINE__ << std::endl;
   *pouts << std::endl
          << "#ifndef RPS_INSTALL_ROOT_OB" << std::endl
          << "#error RPS_INSTALL_ROOT_OB(Oid) macro undefined" << std::endl
@@ -879,6 +967,14 @@ Rps_Dumper::write_generated_roots_file(void)
   //  std::ofstream& out = *pouts;
   rps_each_root_object([=, &pouts, &rootcnt](Rps_ObjectRef obr)
   {
+    rootcnt++;
+    if (rootcnt % 10 == 0)
+      {
+        char cntbuf[32];
+        memset (cntbuf, 0, sizeof(cntbuf));
+        snprintf(cntbuf, sizeof(cntbuf), "~#°%04d", rootcnt);
+        (*pouts) << std::endl << "///" << cntbuf << std::endl;
+      };
     RPS_ASSERT(obr);
     (*pouts) << "RPS_INSTALL_ROOT_OB(" << obr->oid() << ") //";
     std::lock_guard<std::recursive_mutex> guobr(*(obr->objmtxptr()));
@@ -920,8 +1016,13 @@ Rps_Dumper::write_generated_roots_file(void)
         (*pouts) << "∈" << claclapayl->class_name_str();
       };
     (*pouts) << std::endl;
-    rootcnt++;
   });
+  /// output a 100 star comments to ease GNU emacs rectangle facilities
+  {
+    *pouts << "/";
+    for (int k=0; k<100; k++) *pouts << "*";
+    *pouts << "/" << std::endl;
+  }
   *pouts << std::endl
          << "#undef RPS_NB_ROOT_OB" << std::endl
          << "#define RPS_NB_ROOT_OB " << rootcnt << std::endl;
@@ -938,7 +1039,10 @@ Rps_Dumper::write_generated_names_file(void)
   auto rootpathstr = std::string{"generated/rps-names.hh"};
   RPS_DEBUG_LOG(DUMP, "dumper write_generated_names_file start");
   auto pouts = open_output_file(rootpathstr);
-  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr, "//: ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr,
+                                  /*prefix:*/ "//:", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
+  *pouts << "/// generated by write_generated_names_file from " << __FILE__ << ":" << __LINE__ << std::endl;
   *pouts << std::endl
          << "#ifndef RPS_INSTALL_NAMED_ROOT_OB" << std::endl
          << "#error RPS_INSTALL_NAMED_ROOT_OB(Oid,Name) macro undefined" << std::endl
@@ -974,11 +1078,16 @@ Rps_Dumper::write_generated_constants_file(void)
   auto rootpathstr = std::string{"generated/rps-constants.hh"};
   RPS_DEBUG_LOG(DUMP, "dumper write_generated_constants_file start");
   auto pouts = open_output_file(rootpathstr);
-  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr, "//: ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr,
+                                  /*prefix:*/ "//:", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
   unsigned constcnt = 0;
   *pouts << std::endl << "/// collection of constant objects, mentioned in C++ files, "<< std::endl
          << "/// .... prefixed with '"
          <<  RPS_CONSTANTOBJ_PREFIX << "' followed by an oid." << std::endl;
+  *pouts << "/// also the constant _2aNcYqKwdDR01zp0Xp attribute" << std::endl
+         << "/// .... in _1Io89yIORqn02SXx4p == RefPerSys_system" << std::endl;
+  *pouts << "/// generated by write_generated_constants_file from " << __FILE__ << ":" << __LINE__ << std::endl;
   *pouts << std::endl
          << "#ifndef RPS_INSTALL_CONSTANT_OB" << std::endl
          << "#error RPS_INSTALL_CONSTANT_OB(Oid) macro undefined" << std::endl
@@ -986,9 +1095,13 @@ Rps_Dumper::write_generated_constants_file(void)
   for (Rps_ObjectRef constobr : du_constantobset)
     {
       RPS_ASSERT(constobr);
+      std::lock_guard<std::recursive_mutex> guconstobr(*(constobr->objmtxptr()));
       if (constcnt % 10 == 0)
         *pouts << std::endl;
-      *pouts << "RPS_INSTALL_CONSTANT_OB(" << constobr->oid() << ")" << std::endl;
+      Rps_ObjectRef obclass = constobr->get_class();
+      RPS_ASSERT(obclass);
+      *pouts << "RPS_INSTALL_CONSTANT_OB(" << constobr->oid() << ")"
+             << std::endl;
       constcnt ++;
     }
   *pouts << std::endl << "#undef RPS_INSTALL_CONSTANT_OB" << std::endl << std::endl;
@@ -1007,10 +1120,11 @@ Rps_Dumper::write_generated_data_file(void)
   std::lock_guard<std::recursive_mutex> gu(du_mtx);
   char osbuf[64];
   memset (osbuf, 0, sizeof(osbuf));
-  char cwdbuf[rps_path_byte_size];
+  char cwdbuf[rps_path_byte_size+4];
   memset (cwdbuf, 0, sizeof(cwdbuf));
-  if (getcwd(cwdbuf, sizeof(cwdbuf)-16) == nullptr)
-    RPS_FATALOUT("failed to getcwd into buffer of " << (sizeof(cwdbuf)-16) << " bytes: " << strerror(errno));
+  if (getcwd(cwdbuf, rps_path_byte_size) == nullptr)
+    RPS_FATALOUT("failed to getcwd into buffer of "
+                 << (rps_path_byte_size+4) << " bytes: " << strerror(errno));
   int osl = strlen(rps_building_operating_system);
   if (osl > (int)sizeof(osbuf)-2)
     osl = sizeof(osbuf)-2;
@@ -1036,7 +1150,10 @@ Rps_Dumper::write_generated_data_file(void)
                             + std::string(osbuf)+std::string{"_"} + std::string(machinebuf) + ".h";
   std::string gendatapathstr = std::string{"generated/rpsdata.h"};
   auto pouts = open_output_file(datapathstr);
-  rps_emit_gplv3_copyright_notice(*pouts, datapathstr, "//: ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, datapathstr,
+                                  /*prefix:*/ "//:", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
+  *pouts << "/// generated by write_generated_data_file from " << __FILE__ << ":" << __LINE__ << std::endl;
   *pouts << "#ifndef RPS_DATA_INCLUDED\n" << "#define RPS_DATA_INCLUDED 1" << std::endl;
   *pouts << "#define RPS_BUILDING_HOST \"" << rps_building_host << "\"" << std::endl;
   *pouts << "#define RPS_BUILDING_OPERATING_SYSTEM \"" << osbuf << "\"" << std::endl;
@@ -1057,6 +1174,15 @@ Rps_Dumper::write_generated_data_file(void)
   *pouts << "#define RPS_SIZEOF_INT " << sizeof(int) << std::endl;
   *pouts << "#define RPS_SIZEOF_LONG " << sizeof(long) << std::endl;
   *pouts << "#define RPS_SIZEOF_PTR " << sizeof(void*) << std::endl;
+  *pouts << "/// c++ size std::mutex & std::recursive_mtx & std::string" << std::endl;
+  *pouts << "#define RPS_SIZEOF_STDMUTEX " << sizeof(std::mutex) << std::endl;
+  *pouts << "#define RPS_SIZEOF_STDRECURSIVEMUTEX " << sizeof(std::recursive_mutex) << std::endl;
+  *pouts << "#define RPS_SIZEOF_STDSTRING " << sizeof(std::string) << std::endl;
+  *pouts << "/// c++ size std::lock_guard<std::recursive_mutex> & std::map<std::string,void*>" << std::endl;
+  *pouts << "#define RPS_SIZEOF_LOCKGURECMTX " << sizeof(std::lock_guard<std::recursive_mutex>) << std::endl;
+  *pouts << "#define RPS_SIZEOF_MAPSTR2PTR " << sizeof(std::map<std::string,void*>) << std::endl;
+  *pouts << "#define RPS_SIZEOF_FILE " << sizeof(FILE) << std::endl;
+  *pouts << "#define RPS_SIZEOF_STRINGSTREAM " << sizeof(std::stringstream) << std::endl;
   *pouts << "#define RPS_SIZEOF_INTPTR_T " << sizeof(std::intptr_t) << std::endl;
   *pouts << "#define RPS_SIZEOF_PID_T " << sizeof(pid_t) << std::endl;
   *pouts << "#define RPS_SIZEOF_PTHREAD_T " << sizeof(pthread_t) << std::endl;
@@ -1087,6 +1213,14 @@ Rps_Dumper::write_generated_data_file(void)
   *pouts << "#define RPS_ALIGNOF_INT " << alignof(int) << std::endl;
   *pouts << "#define RPS_ALIGNOF_LONG " << alignof(long) << std::endl;
   *pouts << "#define RPS_ALIGNOF_INTPTR_T " << alignof(std::intptr_t) << std::endl;
+  *pouts << "#define RPS_ALIGNOF_STDMUTEX " << alignof(std::mutex) << std::endl;
+  *pouts << "#define RPS_ALIGNOF_STDRECURSIVEMUTEX " << alignof(std::recursive_mutex) << std::endl;
+  *pouts << "#define RPS_ALIGNOF_STDSTRING " << alignof(std::string) << std::endl;
+  *pouts << "/// c++ align std::lock_guard<std::recursive_mutex> & std::map<std::string,void*>" << std::endl;
+  *pouts << "#define RPS_ALIGNOF_LOCKGURECMTX " << alignof(std::lock_guard<std::recursive_mutex>) << std::endl;
+  *pouts << "#define RPS_ALIGNOF_MAPSTR2PTR " << alignof(std::map<std::string,void*>) << std::endl;
+  *pouts << "#define RPS_ALIGNOF_FILE " << alignof(FILE) << std::endl;
+  *pouts << "#define RPS_ALIGNOF_STRINGSTREAM " << alignof(std::stringstream) << std::endl;
   *pouts << "#define RPS_ALIGNOF_PID_T " << alignof(pid_t) << std::endl;
   *pouts << "#define RPS_ALIGNOF_PTHREAD_T " << alignof(pthread_t) << std::endl;
   *pouts << "#define RPS_ALIGNOF_JMP_BUF " << alignof(jmp_buf) << std::endl;
@@ -1113,6 +1247,39 @@ Rps_Dumper::write_generated_data_file(void)
     *pouts << "#define RPS_OBJECTREF_IS_OBJECTPTR 1" << std::endl;
   else
     *pouts << "#define RPS_OBJECTREF_IS_OBJECTPTR 0" << std::endl;
+  *pouts << std::endl << std::endl;
+  bool hasfltk = false;
+  if (rps_fltk_abi_version() > 0)
+    {
+      *pouts << "#define RPS_FLTK_ABI_VERSION " << rps_fltk_abi_version()
+             << std::endl;
+      hasfltk = true;
+    }
+  else
+    {
+      *pouts << "#undef RPS_FLTK_ABI_VERSION" << std::endl;
+      *pouts << "#define RPS_WITHOUT_FLTK_ABI 1" << std::endl;
+    }
+  if (rps_fltk_api_version() > 0)
+    {
+      *pouts << "#define RPS_FLTK_API_VERSION " << rps_fltk_api_version()
+             << std::endl;
+      hasfltk = true;
+    }
+  else
+    {
+      *pouts << "#undef RPS_FLTK_API_VERSION" << std::endl;
+      *pouts << "#define RPS_WITHOUT_FLTK_API 1" << std::endl;
+    }
+  if (hasfltk)
+    {
+      *pouts << "#define RPS_WITH_FLTK 1" << std::endl;
+      rps_fltk_emit_sizes(*pouts);
+    }
+  else
+    {
+      *pouts << "#undef RPS_WITH_FLTK" << std::endl;
+    }
   *pouts << "///" << std::endl;
   *pouts << "#endif //RPS_DATA_INCLUDED\n" << std::endl;
   {
@@ -1126,6 +1293,7 @@ Rps_Dumper::write_generated_data_file(void)
   }
   *pouts << std::endl << std::endl
          << "//// end of generated " << datapathstr
+         << " by " << __FUNCTION__
          << " for shortgitid:" << rps_shortgitid << std::endl;
   (void) remove(gendatapathstr.c_str());
   /* FIXME: we need to add a symlink in the generated/ subdirectory,
@@ -1137,7 +1305,8 @@ Rps_Dumper::write_generated_data_file(void)
   if (symlink(bdata, gendatapathstr.c_str()))
     RPS_FATALOUT("failed to symlink " << gendatapathstr << " to "
                  << bdata
-                 << ":" << strerror(errno));
+                 << ":" << strerror(errno)
+                 << " in " << du_curworkdir);
   RPS_DEBUG_LOG(DUMP, "dumper write_generated_data_file end " << datapathstr);
 } //  end Rps_Dumper::write_generated_data_file
 
@@ -1149,7 +1318,10 @@ Rps_Dumper::write_generated_parser_decl_file(Rps_CallFrame*callfr, Rps_ObjectRef
   auto rootpathstr = std::string{"generated/rps-parser-decl.hh"};
   RPS_DEBUG_LOG(DUMP, "dumper write_generated_parser_decl_file start");
   auto pouts = open_output_file(rootpathstr);
-  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr, "//: ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr,
+                                  /*prefix:*/ "//:", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
+  *pouts << "/// generated by write_generated_parser_decl_file from " << __FILE__ << ":" << __LINE__ << std::endl;
   *pouts << "#warning empty parser declaration file " << rootpathstr
          << " from " << __FILE__ << ":" << __LINE__
          << std::endl;
@@ -1165,7 +1337,10 @@ Rps_Dumper::write_generated_parser_impl_file(Rps_CallFrame*callfr, Rps_ObjectRef
   auto rootpathstr = std::string{"generated/rps-parser-impl.cc"};
   RPS_DEBUG_LOG(DUMP, "dumper write_generated_parser_decl_file start");
   auto pouts = open_output_file(rootpathstr);
-  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr, "//: ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, rootpathstr,
+                                  /*prefix:*/ "//:", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
+  *pouts << "/// generated by write_generated_parser_impl_file from " << __FILE__ << ":" << __LINE__ << std::endl;
   *pouts << "#warning empty parser implementation file " << rootpathstr
          << " from " << __FILE__ << ":" << __LINE__
          << std::endl;
@@ -1250,12 +1425,16 @@ Rps_Dumper::write_manifest_file(void)
   std::lock_guard<std::recursive_mutex> gu(du_mtx);
   RPS_DEBUG_LOG(DUMP, "dumper write_manifest_file start");
   auto pouts = open_output_file(RPS_MANIFEST_JSON);
-  rps_emit_gplv3_copyright_notice(*pouts, RPS_MANIFEST_JSON, "//!! ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, RPS_MANIFEST_JSON,
+                                  /*prefix:*/ "//!!", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
   Json::Value jmanifest(Json::objectValue);
   jmanifest["format"] = Json::Value (RPS_MANIFEST_FORMAT);
-  jmanifest["jsoncpp-version"] = JSONCPP_VERSION_STRING;
-  jmanifest["short-git-id"] = rps_shortgitid;
-  jmanifest["git-branch"] = rps_gitbranch;
+  jmanifest["jsoncppversion"] = JSONCPP_VERSION_STRING;
+  jmanifest["rpsmajorversion"] = Json::Value(rps_get_major_version());
+  jmanifest["rpsminorversion"] = Json::Value(rps_get_minor_version());
+  jmanifest["shortgitid"] = rps_shortgitid;
+  jmanifest["gitbranch"] = rps_gitbranch;
   {
     int nbroots=0;
     Json::Value jglobalroots(Json::arrayValue);
@@ -1371,7 +1550,9 @@ Rps_Dumper::write_space_file(Rps_ObjectRef spacobr)
     curspaset = curspa->sp_setob;
   }
   RPS_ASSERT(pouts);
-  rps_emit_gplv3_copyright_notice(*pouts, curelpath, "//// ", "");
+  rps_emit_gplv3_copyright_notice(*pouts, curelpath,
+                                  /*prefix:*/ "///.", /*suffix:*/"",
+                                  /*owner:*/"", /*reason:*/"");
   *pouts << std::endl;
   // emit the prologue
   {
@@ -1380,8 +1561,10 @@ Rps_Dumper::write_space_file(Rps_ObjectRef spacobr)
     Json::Value jprologue(Json::objectValue);
     jprologue["format"] = Json::Value (RPS_MANIFEST_FORMAT);
     jprologue["spaceid"] = Json::Value (spacid.to_string());
-    jprologue["jsoncpp-version"] =  JSONCPP_VERSION_STRING;
+    jprologue["jsoncppversion"] =  JSONCPP_VERSION_STRING;
     jprologue["nbobjects"] = Json::Value ((int)(curspaset.size()));
+    jprologue["rpsmajorversion"] = Json::Value(rps_get_major_version());
+    jprologue["rpsminorversion"] = Json::Value(rps_get_minor_version());
     jsonwriter->write(jprologue, pouts.get());
     *pouts << std::endl;
   }
@@ -1577,7 +1760,7 @@ void rps_dump_into (std::string dirpath, Rps_CallFrame* callframe)
   //// dumpobject in Rps_Dumper.
 #warning we may want to make some temporary obdumper and keep it...
   Rps_Dumper dumper(realdirpath, &_);
-  RPS_INFORMOUT("start dumping into " << dumper.get_top_dir()
+  RPS_INFORMOUT("start dumping into " << dumper.get_top_dir() << " " << (dumper.is_dumping_into_topdir()?"loaded directory":"other directory")
                 << " with temporary suffix " << dumper.get_temporary_suffix());
   try
     {
@@ -1605,6 +1788,7 @@ void rps_dump_into (std::string dirpath, Rps_CallFrame* callframe)
                           << "/generated");
         }
       dumper.scan_roots();
+      dumper.add_constants_known_from_RefPerSys_system();
       dumper.scan_every_cplusplus_source_file_for_constants();
       dumper.scan_loop_pass();
       RPS_DEBUG_LOG(DUMP, "rps_dump_into realdirpath=" << realdirpath << " start writing "
@@ -1616,6 +1800,7 @@ void rps_dump_into (std::string dirpath, Rps_CallFrame* callframe)
       dumper.write_all_generated_files();
       dumper.write_manifest_file();
       dumper.rename_opened_files();
+      sync();
       double endelapsed = rps_elapsed_real_time();
       double endcputime = rps_process_cpu_time();
       RPS_INFORMOUT("dump into " << dumper.get_top_dir()
@@ -1649,7 +1834,7 @@ void rps_dump_into (std::string dirpath, Rps_CallFrame* callframe)
 extern "C" rps_applyingfun_t rpsapply_5Q5E0Lw9v4f046uAKZ;
 /// method generate_code°the_system_class
 Rps_TwoValues
-rpsapply_5Q5E0Lw9v4f046uAKZ(Rps_CallFrame*callerframe,
+rpsapply_5Q5E0Lw9v4f046uAKZ(Rps_CallFrame*callerframe, /// "generate_code°the_system_class"
                             const Rps_Value arg0,
                             const Rps_Value arg1,
                             const Rps_Value arg2,

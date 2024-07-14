@@ -7,11 +7,11 @@
  *      It is almost its only public C++ header file.
  *
  * Author(s):
- *      Basile Starynkevitch <basile@starynkevitch.net>
- *      Abhishek Chakravarti <abhishek@taranjali.org>
- *      Nimesh Neema <nimeshneema@gmail.com>
+ *      Basile Starynkevitch, France   <basile@starynkevitch.net>
+ *      Abhishek Chakravarti, India    <abhishek@taranjali.org>
+ *      Nimesh Neema, India            <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2023 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * You can consider RefPerSys as either GPLv3+ or LGPLv3+ licensed (at
@@ -40,8 +40,6 @@
  *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  ******************************************************************************/
 
-// comment for our do-scan-pkgconfig.c utility
-//@@PKGCONFIG jsoncpp
 
 
 #ifndef REFPERSYS_INCLUDED
@@ -119,6 +117,9 @@
 #include <sys/personality.h>
 #include <sys/signalfd.h>
 #include <sys/timerfd.h>
+#include <wordexp.h>
+#include <glob.h>
+
 
 /// libtar-dev package on Debian
 #include <libtar.h>
@@ -129,6 +130,113 @@
 /// libgmp-dev package on Debian (GNU multiprecision library, and its
 /// C++ wrapper)
 #include <gmpxx.h>
+
+#define RPS_WITH_FLTK 1
+
+//// the generated/rpsdata.h contain only preprocessor #define-s and #undef
+//// it may undef RPS_WITH_FLTK
+//// it is simpler to not use it...
+#ifdef RPS_WITH_DATA
+#include "generated/rpsdata.h"
+#endif //RPS_WITH_DATA
+
+
+
+/// keep the debug options in alphabetical order
+#define RPS_DEBUG_OPTIONS(dbgmacro) \
+  dbgmacro(CMD)                     \
+  dbgmacro(CODEGEN)                 \
+  dbgmacro(COMPL_REPL)              \
+  dbgmacro(DUMP)                    \
+  dbgmacro(EVENT_LOOP)              \
+  dbgmacro(GARBAGE_COLLECTOR)       \
+  dbgmacro(GUI)                     \
+  dbgmacro(LOAD)                    \
+  dbgmacro(LOWREP)                  \
+  dbgmacro(LOW_REPL)                \
+  dbgmacro(MISC)                    \
+  dbgmacro(MSGSEND)                 \
+  dbgmacro(PARSE)                   \
+  dbgmacro(PARSE_STRING)            \
+  dbgmacro(PROGARG)                 \
+  dbgmacro(REPL)                    \
+  /*end RPS_DEBUG_OPTIONS*/
+
+#define RPS_DEBUG_OPTION_DEFINE(dbgopt) RPS_DEBUG_##dbgopt,
+
+/// passed to rps_fltk_show_debug_message as the debug level for
+/// warning, inform, fatal
+constexpr int RPS_INFORM_MSG_LEVEL= -1;
+constexpr int RPS_WARNING_MSG_LEVEL= -2;
+constexpr int RPS_FATAL_MSG_LEVEL= -3;
+
+
+
+enum Rps_Debug
+{
+  RPS_DEBUG__FATAL_MSG_LEVEL=  RPS_FATAL_MSG_LEVEL /*ie -3*/,
+  RPS_DEBUG__WARNING_MSG_LEVEL=  RPS_WARNING_MSG_LEVEL /*ie -2*/,
+  RPS_DEBUG__INFORM_MSG_LEVEL= RPS_INFORM_MSG_LEVEL /*ie -1*/,
+  RPS_DEBUG__NONE= 0,
+  // expands to RPS_DEBUG_CMD, RPS_DEBUG_DUMP, RPS_DEBUG_GARBAGE_COLLECTOR...
+  RPS_DEBUG_OPTIONS(RPS_DEBUG_OPTION_DEFINE)
+  RPS_DEBUG__LAST,
+  RPS_DEBUG__EVERYTHING=0xffff,
+};
+
+// forward declaration
+class Rps_ProtoCallFrame;
+typedef Rps_ProtoCallFrame Rps_CallFrame;
+
+typedef void Rps_EventHandler_sigt(Rps_CallFrame*, int /*fd*/, void* /*data*/);
+
+#if RPS_WITH_FLTK
+extern "C" int rps_fltk_abi_version (void);
+extern "C" int rps_fltk_api_version (void);
+extern "C" void rps_fltk_initialize (int argc, char**argv);
+extern "C" void rps_fltk_progoption(char*arg, struct argp_state*, bool side_effect);
+extern "C" bool rps_fltk_enabled (void);
+extern "C" void rps_fltk_run (void);
+extern "C" void rps_fltk_stop (void);
+extern "C" void rps_fltk_flush (void);
+extern "C" void rps_fltk_show_debug_message(const char*file, int line, const char*funcname,
+    Rps_Debug dbgopt, long dbgcount,
+    const char*msg);
+extern "C" void rps_fltk_printf_inform_message(const char*file, int line, const char*funcname, long dbgcount,
+    const char*fmt, ...)
+__attribute__ ((format (printf, 5, 6)));
+/* add an input file descriptor event handler to FLTK event loop */
+extern "C" void rps_fltk_add_input_fd(int fd,
+                                      Rps_EventHandler_sigt* f,
+                                      const char* explanation,
+                                      int ix);
+/* add an output file descriptor event handler to FLTK event loop */
+extern "C" void rps_fltk_add_output_fd(int fd,
+                                       Rps_EventHandler_sigt* f,
+                                       const char* explanation,
+                                       int ix);
+/* remove an input file descriptor event handler from FLTK event loop */
+extern "C" void rps_fltk_remove_input_fd(int fd);
+/* remove an output file descriptor event handler from FLTK event loop */
+extern "C" void rps_fltk_remove_output_fd(int fd);
+/* emit the size and align */
+extern "C" void rps_fltk_emit_sizes(std::ostream&out);
+#else /*not RPS_WITH_FLTK*/
+#define rps_fltk_abi_version() 0
+#define rps_fltk_api_version() 0
+#define rps_fltk_initialize() do {}while(0)
+#define rps_fltk_progoption(Arg,State,SidEff) do {}while(0)
+#define rps_fltk_enabled() false
+#define rps_fltk_add_input_fd(Fd,Fun,Expl,Ix) do {}while(0)
+#define rps_fltk_add_output_fd(Fd,Fun,Expl,Ix) do {}while(0)
+#define rps_fltk_remove_input_fd(Fd) do{}while(0)
+#define rps_fltk_remove_output_fd(Fd) do{}while(0)
+#define rps_fltk_stop() do{}while(0)
+#define rps_fltk_run() do{}while(0)
+#define rps_fltk_flush() do{}while(0)
+#define rps_fltk_emit_sizes(Out) do{}while(0)
+#define rps_fltk_printf_inform_message(File,Lin,Funcname,Count,Fmt,...) do{}while(0)
+#endif
 
 class Rps_QuasiZone; // GC-managed piece of memory
 class Rps_ZoneValue; // memory for values
@@ -147,6 +255,12 @@ class Rps_PayloadTasklet;
 class Rps_PayloadUnixProcess;   // transient payload for forked processes
 class Rps_PayloadPopenedFile;   // transient payload for popened command
 class Rps_PayloadCppStream;     // transient payload for C++ streams
+#if RPS_WITH_FLTK
+class Rps_PayloadFltkThing;
+class Rps_PayloadFltkWidget;
+class Rps_PayloadFltkWindow;
+//TODO: add perhaps Rps_PayloadFltkWindow?
+#endif
 class Rps_Loader;
 class Rps_Dumper;
 class Rps_ProtoCallFrame;
@@ -160,7 +274,14 @@ typedef Rps_ProtoCallFrame Rps_CallFrame;
 
 constexpr unsigned rps_path_byte_size = 384;
 extern "C" char rps_bufpath_homedir[rps_path_byte_size];
+extern "C" char rps_loaded_directory[rps_path_byte_size];
 extern "C" char rps_debug_path[rps_path_byte_size];
+
+extern "C" int rps_get_major_version(void);
+extern "C" int rps_get_minor_version(void);
+#define RPS_MAJOR_VERSION_NUM 0
+#define RPS_MINOR_VERSION_NUM 6
+
 
 extern "C" std::map<std::string,std::string> rps_pluginargs_map;
 extern "C" std::string rps_cpluspluseditor_str;
@@ -175,6 +296,9 @@ extern "C" char* rps_run_command_after_load;
 extern "C" char* rps_debugflags_after_load;
 
 extern "C" std::string rps_run_name;
+
+extern "C" std::string rps_stringprintf(const char*fmt, ...)
+__attribute__((format (printf, 1, 2))); // in utilities_rps.cc
 
 extern "C" {
 
@@ -200,6 +324,8 @@ extern "C" {
 
 
 
+// comment for our do-scan-pkgconfig.c utility
+//@@PKGCONFIG jsoncpp
 // JsonCPP https://github.com/open-source-parsers/jsoncpp
 #include "json/json.h"
 
@@ -209,7 +335,6 @@ extern "C" {
 #include "unistr.h"
 
 #include "backtrace.h"
-
 
 // mark unlikely conditions to help optimization
 #ifdef __GNUC__
@@ -236,9 +361,20 @@ extern "C" const char rps_lastgitcommit[];
 extern "C" const char rps_md5sum[];
 extern "C" const char*const rps_files[];
 extern "C" const char rps_gnumakefile[];
+extern "C" const char rps_gnu_make[];
+extern "C" const char rps_gnu_make_version[];
+extern "C" const char rps_gnu_bison[];
+extern "C" const char rps_gnu_bison_version[];
+
 extern "C" const char*const rps_subdirectories[];
 extern "C" const char rps_cxx_compiler_realpath[];
 extern "C" const char rps_cxx_compiler_version[];
+extern "C" const char rps_gpp_preprocessor_command[];
+extern "C" const char rps_gpp_preprocessor_realpath[];
+extern "C" const char rps_gpp_preprocessor_version[];
+extern "C" const char rps_ninja_builder[];
+extern "C" const char rps_ninja_version[];
+
 extern "C" const char rps_plugin_builder_script[];
 
 /// In commit 92c6e6b70d2 of Feb, 8, 2024 we used to mention GNU bison and GPP
@@ -275,62 +411,6 @@ extern "C" bool rps_syslog_enabled; /// --syslog option
 ///////////////////////////////////////////////////////////////////////////////
 /// Provides miscellaneous runtime information for RefPerSys.
 ///
-/// The RpsColophon class is a convenience C++ wrapper around the extern
-/// constants generated at runtime in the _timestamp_rps.c file. This class
-/// allows for a cleaner and more idiomatic way to reference the runtime
-/// generated constants.
-#warning RpsColophon is never used, should be removed.
-class RpsColophon
-{
-public:
-
-  /// Gets the current timestamp.
-  ///
-  /// @see rps_timestamp[]
-  static inline std::string timestamp()
-  {
-    return std::string (rps_timestamp);
-  }
-
-  /// Gets the current Git ID.
-  ///
-  /// @see rps_gitid[]
-  static inline std::string git_id()
-  {
-    return std::string (rps_gitid);
-  }
-
-  /// Gets the MD5 sum of the source.
-  ///
-  /// @see rps_md5sum
-  static inline std::string source_md5()
-  {
-    return std::string (rps_md5sum);
-  }
-
-  /// Gets the last Git commit details.
-  ///
-  /// @see rps_lastgitcommit
-  static inline std::string last_git_commit()
-  {
-    return std::string (rps_lastgitcommit);
-  }
-
-  /// Gets the top level directory.
-  ///
-  /// rps_topdirectory
-  static inline std::string top_directory()
-  {
-    return std::string (rps_topdirectory);
-  }
-
-  /// Gets the URL of the RefPerSys website.
-  static inline std::string website()
-  {
-    return std::string ("http://refpersys.org/");
-  }
-};                              // end class RpsColophon
-
 
 extern "C" pid_t rps_gui_pid;
 
@@ -378,12 +458,40 @@ extern "C" bool rps_disable_aslr;
 extern "C" bool rps_run_repl;
 
 
-extern "C" void jsonrpc_initialize_rps(void);
+extern "C" void rps_jsonrpc_initialize(void);
 
+/// Our event loop can call C++ closures before the poll(2) system
+/// call in the event loop. This C++ closure (or std::function) could
+/// add additional sources to the event loop. This
+/// rps_register_event_loop_prepoller function returns some index for
+/// the unregistering function.
+extern "C" int rps_register_event_loop_prepoller(std::function<void (struct pollfd*, int& npoll, Rps_CallFrame*)> fun);
+extern "C" void rps_unregister_event_loop_prepoller(int rank);
+
+/// register C function input handler
+extern "C" void rps_event_loop_add_input_fd_handler
+(int fd,
+ Rps_EventHandler_sigt*cfun,
+ const char* explanation = nullptr,
+ void*data = nullptr);
+extern "C" void rps_event_loop_add_output_fd_handler
+(int fd,
+ Rps_EventHandler_sigt*cfun,
+ const char* explanation = nullptr,
+ void*data = nullptr);
+extern "C" void rps_event_loop_remove_input_fd_handler(int fd);
+extern "C" void rps_event_loop_remove_output_fd_handler(int fd);
+extern "C" void rps_initialize_event_loop(void);
 extern "C" void rps_event_loop(void); // run the event loop
+extern "C" void rps_run_after_event_loop(void); // run after some event loop
+extern "C" void rps_register_after_event_loop(std::function<void(void)>f); // run after some event loop
 extern "C" void rps_do_stop_event_loop(void);
 // in eventloop_rps.cc, tell if the event loop is running.
 extern "C" bool rps_event_loop_is_running(void);
+/* return true, and fill the information, about entry#ix in event loop
+   internal data, or else return false */
+extern "C" bool rps_event_loop_get_entry(int ix,
+    Rps_EventHandler_sigt** pfun, struct pollfd*po, const char**pexpl, void**pdata);
 // in eventloop_rps.cc, give the counter for the loop, or -1 if it is
 // not running.
 extern "C" long rps_event_loop_counter(void);
@@ -430,9 +538,13 @@ extern "C" const char* rps_homedir(void);
 /// the refpersys load directory
 extern "C" const std::string& rps_get_loaddir(void);
 
-extern "C" void rps_emit_gplv3_copyright_notice(std::ostream&outs, std::string path, std::string linprefix, std::string linsuffix);
+extern "C" void rps_emit_gplv3_copyright_notice_AT(std::ostream&outs, const char*fil, int lin, const char*fromfunc, std::string path, std::string linprefix, std::string linsuffix, std::string owner="", std::string reason="");
 
-extern "C" void rps_emit_lgplv3_copyright_notice(std::ostream&outs, std::string path, std::string linprefix, std::string linsuffix, std::string owner="");
+#define rps_emit_gplv3_copyright_notice(Out,...) rps_emit_gplv3_copyright_notice_AT(Out,__FILE__,__LINE__,__PRETTY_FUNCTION__,##__VA_ARGS__)
+
+extern "C" void rps_emit_lgplv3_copyright_notice_AT(std::ostream&outs, const char*fil, int lin, const char*fromfunc, std::string path, std::string linprefix, std::string linsuffix, std::string owner="", std::string reason="");
+
+#define rps_emit_lgplv3_copyright_notice(Out,...) rps_emit_gplv3_copyright_notice_AT(Out,__FILE__,__LINE__,__PRETTY_FUNCTION__,##__VA_ARGS__)
 
 extern "C" FILE*rps_debug_file;
 
@@ -453,12 +565,17 @@ extern "C" void rps_fatal_stop_at (const char *, int) __attribute__((noreturn));
               Fil, Lin, __PRETTY_FUNCTION__,                            \
               ##__VA_ARGS__);                                           \
   };                                                                    \
+    if (rps_fltk_enabled())           \
+      rps_fltk_printf_inform_message(Fil, Lin, __PRETTY_FUNCTION__, \
+             rps_incremented_debug_counter(),       \
+             "FATAL:" Fmt, ##__VA_ARGS__);        \
   if (rps_debug_file && rps_debug_file != stderr)                       \
     fprintf(rps_debug_file,                                             \
             "\n\n*°* RefPerSys °FATAL° %s:%d:%s " Fmt "*°*\n",          \
             Fil, Lin, __PRETTY_FUNCTION__,                              \
             ##__VA_ARGS__);                                             \
   rps_fatal_stop_at (Fil,Lin); } while(0)
+
 #define RPS_FATAL_AT(Fil,Lin,Fmt,...) RPS_FATAL_AT_BIS(Fil,Lin,Fmt,##__VA_ARGS__)
 #define RPS_FATAL(Fmt,...) RPS_FATAL_AT(__FILE__,__LINE__,Fmt,##__VA_ARGS__)
 
@@ -498,6 +615,8 @@ extern "C" void rps_fatal_stop_at (const char *, int) __attribute__((noreturn));
 
 //////////////// warnings
 
+
+extern "C" long rps_incremented_debug_counter(void);
 
 extern "C" void rps_debug_warn_at(const char*file, int line);
 #define RPS_WARN_AT_BIS(Fil,Lin,Fmt,...) do {                   \
@@ -635,43 +754,13 @@ extern "C" void rps_publish_me(const char*url);
 // https://github.com/bstarynk/melt-monitor/blob/master/meltmoni.hh#L278
 ///////////////////////////////////////////////////////////////////////////////
 
-extern "C" void rps_set_debug(const std::string &deblev);
+extern "C" bool rps_is_set_debug(const std::string &deblev);
+extern "C" Rps_Debug rps_debug_of_string(const std::string &deblev);
+extern "C" const char*rps_cstr_of_debug(Rps_Debug); /* gives null for
+                   non-debug options */
 
 // output a set of debug flags, or rps_debug_flags if flag is zero...
 extern "C" void rps_output_debug_flags(std::ostream&out, unsigned flags=0);
-
-/// keep the debug options in alphabetical order
-#define RPS_DEBUG_OPTIONS(dbgmacro) \
-  dbgmacro(CMD)                     \
-  dbgmacro(COMPL_REPL)              \
-  dbgmacro(DUMP)                    \
-  dbgmacro(EVENT_LOOP)              \
-  dbgmacro(GARBAGE_COLLECTOR)       \
-  dbgmacro(GENERATED_CODE)          \
-  dbgmacro(GUI)                     \
-  dbgmacro(LOAD)                    \
-  dbgmacro(LOWREP)                  \
-  dbgmacro(LOW_REPL)                \
-  dbgmacro(MISC)                    \
-  dbgmacro(MSGSEND)                 \
-  dbgmacro(PARSE)                   \
-  dbgmacro(PARSE_STRING)            \
-  dbgmacro(REPL)                    \
-  /*end RPS_DEBUG_OPTIONS*/
-
-#define RPS_DEBUG_OPTION_DEFINE(dbgopt) RPS_DEBUG_##dbgopt,
-
-
-
-
-enum Rps_Debug
-{
-  RPS_DEBUG__NONE,
-  // expands to RPS_DEBUG_CMD, RPS_DEBUG_DUMP, RPS_DEBUG_GARBAGE_COLLECTOR...
-  RPS_DEBUG_OPTIONS(RPS_DEBUG_OPTION_DEFINE)
-  RPS_DEBUG__LAST,
-  RPS_DEBUG__EVERYTHING=0xffff,
-};
 
 /// add or remove a comma or space separated list of debug flags
 extern "C" void rps_add_debug_cstr(const char*);
@@ -686,6 +775,7 @@ enum rps_progoption_en
   RPSPROGOPT_DEBUG_AFTER_LOAD='A',
   RPSPROGOPT_BATCH='B',
   RPSPROGOPT_DUMP='D',
+  RPSPROGOPT_FLTK='F',
   RPSPROGOPT_JSONRPC='J',      // no direct GUI, but use JSONRPC
   RPSPROGOPT_LOADDIR='L',
   RPSPROGOPT_COMMAND='c',
@@ -694,10 +784,13 @@ enum rps_progoption_en
   /// see also github.com/bstarynk/misc-basile/blob/master/mini-edit-JSONRPC.md
   RPSPROGOPT_JOBS='j',
   RPSPROGOPT_HOMEDIR=1000,
+  RPSPROGOPT_CHDIR_BEFORE_LOAD,
+  RPSPROGOPT_CHDIR_AFTER_LOAD,
   RPSPROGOPT_RANDOMOID,
   RPSPROGOPT_TYPEINFO,
   RPSPROGOPT_SYSLOG,
   RPSPROGOPT_DAEMON,
+  RPSPROGOPT_PID_FILE,
   RPSPROGOPT_NO_TERMINAL,
   RPSPROGOPT_NO_ASLR,
   RPSPROGOPT_NO_QUICK_TESTS,
@@ -711,6 +804,7 @@ enum rps_progoption_en
   RPSPROGOPT_DEBUG_PATH,
   RPSPROGOPT_EXTRA_ARG,
   RPSPROGOPT_RUN_NAME,
+  RPSPROGOPT_ECHO,
   RPSPROGOPT_VERSION,
   RPSPROGOPT_PUBLISH_ME,
 };
@@ -744,18 +838,19 @@ void rps_set_debug_output_path(const char*filepath);
 /// rps_set_debug_output_path ....; if fline is negative, print a
 /// newline before....
 void
-rps_debug_printf_at(const char *fname, int fline, Rps_Debug dbgopt,
+rps_debug_printf_at(const char *fname, int fline,const char*funcname, Rps_Debug dbgopt,
                     const char *fmt, ...)
-__attribute__ ((format (printf, 4, 5)));
+__attribute__ ((format (printf, 5, 6)));
 
 
-#define RPS_DEBUG_PRINTF_AT(fname, fline, dbgopt, fmt, ...)      \
-do                                                               \
-  {                                                              \
-    if (RPS_DEBUG_ENABLED(dbgopt))                               \
-      rps_debug_printf_at(fname, fline, RPS_DEBUG_##dbgopt, fmt, \
-                          ##__VA_ARGS__);                        \
-  }                                                              \
+#define RPS_DEBUG_PRINTF_AT(fname, fline, dbgopt, fmt, ...)    \
+do                                                             \
+  {                                                            \
+    if (RPS_DEBUG_ENABLED(dbgopt))                             \
+      rps_debug_printf_at(fname, fline,__FUNCTION__,           \
+        RPS_DEBUG_##dbgopt, fmt,                               \
+                          ##__VA_ARGS__);                      \
+  }                                                            \
 while (0)
 
 
@@ -770,15 +865,17 @@ while (0)
 
 
 #define RPS_DEBUG_LOG_AT(fname, fline, dbgopt, logmsg)   do     \
-  {                                                                 \
-    if (RPS_DEBUG_ENABLED(dbgopt))                                  \
-      {                                                             \
-        std::ostringstream _logstream_##fline;                      \
-        _logstream_##fline << logmsg << std::flush;                 \
-        rps_debug_printf_at(fname, fline, RPS_DEBUG_##dbgopt, "%s", \
-                            _logstream_##fline.str().c_str());      \
-      }                                                             \
-  }                                                                 \
+  {                                                             \
+    if (RPS_DEBUG_ENABLED(dbgopt))                              \
+      {                                                         \
+        std::ostringstream _logstream_##fline;                  \
+        _logstream_##fline << logmsg << std::flush;             \
+        rps_debug_printf_at(fname, fline, __FUNCTION__,   \
+          RPS_DEBUG_##dbgopt,                                   \
+          "%s",                                                 \
+          _logstream_##fline.str().c_str());                    \
+      }                                                         \
+  }                                                             \
 while (0)
 
 #define RPS_DEBUG_LOG_AT_BIS(fname, fline, dbgopt, logmsg)  \
@@ -794,7 +891,8 @@ while (0)
       {                                                         \
         std::ostringstream _logstream_##fline;                  \
         _logstream_##fline << logmsg << std::flush;             \
-        rps_debug_printf_at(fname, -fline, RPS_DEBUG_##dbgopt,  \
+        rps_debug_printf_at(fname, -fline, __FUNCTION__,  \
+          RPS_DEBUG_##dbgopt,     \
                             "%s",                               \
                             _logstream_##fline.str().c_str());  \
       }                                                         \
@@ -813,11 +911,11 @@ while (0)
 
 #define RPS_INFORM_AT_BIS(Fil,Lin,Fmt,...) do {                 \
     bool ontty = rps_stdout_istty;                              \
-    if (rps_syslog_enabled) {         \
+    if (rps_syslog_enabled) {                                   \
       syslog(LOG_INFO, "RefPerSys INFORM %s:%d: %s " Fmt "\n",  \
-       Fil, Lin, __PRETTY_FUNCTION__, ##__VA_ARGS__); \
-    } else              \
-      fprintf(stdout, "\n\n"          \
+       Fil, Lin, __PRETTY_FUNCTION__, ##__VA_ARGS__);           \
+    } else {                                                    \
+      fprintf(stdout, "\n\n"                                    \
             "%s*** RefPerSys INFORM:%s %s:%d: %s<%s>%s\n "      \
             Fmt "\n\n",                                         \
             ontty?RPS_TERMINAL_BOLD_ESCAPE:"",                  \
@@ -827,7 +925,15 @@ while (0)
             __PRETTY_FUNCTION__,                                \
             ontty?RPS_TERMINAL_NORMAL_ESCAPE:"",                \
             ##__VA_ARGS__);                                     \
-    fflush(stdout); } while(0)
+      fflush(stdout); };                                        \
+    if (rps_fltk_enabled())                                     \
+      rps_fltk_printf_inform_message                            \
+        (Fil,Lin,                                               \
+         __PRETTY_FUNCTION__,                                   \
+         rps_incremented_debug_counter(),                       \
+         Fmt,                                                   \
+         ##__VA_ARGS__);                                        \
+} while(0)
 
 #define RPS_INFORM_AT(Fil,Lin,Fmt,...) RPS_INFORM_AT_BIS(Fil,Lin,Fmt,##__VA_ARGS__)
 
@@ -836,12 +942,12 @@ while (0)
 
 #define RPS_INFORMOUT_AT_BIS(Fil,Lin,...) do {          \
     std::ostringstream outs_##Lin;                      \
-    if (rps_syslog_enabled) {       \
+    if (rps_syslog_enabled) {                           \
       outs_##Lin << __VA_ARGS__  << std::flush;         \
-      syslog(LOG_INFO, "%s:%d:%s %s\n",     \
-       (Fil), (Lin), __PRETTY_FUNCTION__,   \
-       outs_##Lin.str().c_str());           \
-    } else {            \
+      syslog(LOG_INFO, "%s:%d:%s %s\n",                 \
+       (Fil), (Lin), __PRETTY_FUNCTION__,               \
+       outs_##Lin.str().c_str());                       \
+    } else {                                            \
     bool ontty = rps_stdout_istty;                      \
     outs_##Lin                                          \
       << (ontty?RPS_TERMINAL_BOLD_ESCAPE:"")            \
@@ -855,8 +961,8 @@ while (0)
     fputs(outs_##Lin.str().c_str(), stdout);            \
     fputc('\n', stdout);                                \
     fflush(stdout);                                     \
-  }             \
-  } while(0)
+  }                                                     \
+} while(0)
 
 #define RPS_INFORMOUT_AT(Fil,Lin,...) RPS_INFORMOUT_AT_BIS(Fil,Lin,##__VA_ARGS__)
 
@@ -881,18 +987,18 @@ while (0)
 ///
 #define RPS_ASSERT_AT_BIS(Fil,Lin,Func,Cond) do {               \
   if (RPS_UNLIKELY(!(Cond))) {                                  \
-    if (rps_syslog_enabled)         \
-      syslog(LOG_CRIT,            \
-       "*** RefPerSys ASSERT failed: %s *** [%s:%d:%s]",  \
-       #Cond, Fil, Lin, Func);        \
-    else              \
-      fprintf(stderr, "\n\n"          \
-        "%s*** RefPerSys ASSERT failed: %s%s\n"   \
-        "%s:%d: {%s}\n\n",        \
-        (rps_stderr_istty?RPS_TERMINAL_BOLD_ESCAPE:""), \
-        #Cond,            \
-        (rps_stderr_istty?RPS_TERMINAL_NORMAL_ESCAPE:""), \
-        Fil,Lin,Func);          \
+    if (rps_syslog_enabled)                                     \
+      syslog(LOG_CRIT,                                          \
+       "*** RefPerSys ASSERT failed: %s *** [%s:%d:%s]",        \
+       #Cond, Fil, Lin, Func);                                  \
+    else                                                        \
+      fprintf(stderr, "\n\n"                                    \
+        "%s*** RefPerSys ASSERT failed: %s%s\n"                 \
+        "%s:%d: {%s}\n\n",                                      \
+        (rps_stderr_istty?RPS_TERMINAL_BOLD_ESCAPE:""),         \
+        #Cond,                                                  \
+        (rps_stderr_istty?RPS_TERMINAL_NORMAL_ESCAPE:""),       \
+        Fil,Lin,Func);                                          \
   rps_fatal_stop_at(Fil,Lin); }} while(0)
 
 #define RPS_ASSERT_AT(Fil,Lin,Func,Cond) RPS_ASSERT_AT_BIS(Fil,Lin,Func,Cond)
@@ -900,12 +1006,12 @@ while (0)
 
 #define RPS_ASSERTPRINTF_AT_BIS(Fil,Lin,Func,Cond,Fmt,...) do { \
   if (RPS_UNLIKELY(!(Cond))) {                                  \
-    if (rps_syslog_enabled)         \
-      syslog(LOG_CRIT,            \
-       "*** RefPerSys ASSERTPRINTF failed:"   \
-       " %s *** [%s:%d:%s]" Fmt,        \
-       #Cond, Fil, Lin, Func, ##__VA_ARGS__);   \
-    else {              \
+    if (rps_syslog_enabled)                                     \
+      syslog(LOG_CRIT,                                          \
+       "*** RefPerSys ASSERTPRINTF failed:"                     \
+       " %s *** [%s:%d:%s]" Fmt,                                \
+       #Cond, Fil, Lin, Func, ##__VA_ARGS__);                   \
+    else {                                                      \
       fprintf(stderr, "\n\n"                                    \
               "%s*** RefPerSys ASSERTPRINTF failed:%s %s\n"     \
               "%s:%d: {%s}\n",                                  \
@@ -914,8 +1020,8 @@ while (0)
           (rps_stderr_istty?RPS_TERMINAL_NORMAL_ESCAPE:""),     \
               Fil, Lin, Func);                                  \
       fprintf(stderr, "!*!*! " Fmt "\n\n", ##__VA_ARGS__);      \
-    };                \
-    rps_fatal_stop_at(Fil, Lin); }        \
+    };                                                          \
+    rps_fatal_stop_at(Fil, Lin); }                              \
  } while(0)
 
 #define RPS_ASSERTPRINTF_AT(Fil,Lin,Func,Cond,Fmt,...) RPS_ASSERTPRINTF_AT_BIS(Fil,Lin,Func,Cond,Fmt,##__VA_ARGS__)
@@ -1121,6 +1227,12 @@ extern "C" std::string rps_json_to_string(const Json::Value&jv);
 extern "C" void rps_output_program_arguments(std::ostream& out,
     int argc, const char*const*argv);
 
+#define RPS_OUT_PROGARGS(Argc,Argv)                     \
+  Rps_Do_Output([&](std::ostream&out)                   \
+{                                                       \
+  rps_output_program_arguments(out, (Argc), (Argv));    \
+})
+
 #define RPS_FLEXIBLE_DIM 0      /* for flexible array members */
 
 /// In rare occasions (some kind of array hash table, perhaps) we may
@@ -1156,6 +1268,12 @@ extern "C" int64_t rps_prime_lessequal_ranked (int64_t n, int*prank);
 
 // give the name of the current pthread
 static inline std::string rps_current_pthread_name(void);
+
+// give its index
+static inline int rps_current_pthread_index(void);
+
+extern "C" thread_local int rps_curthread_ix;
+extern "C" thread_local Rps_CallFrame* rps_curthread_callframe;
 
 static constexpr unsigned rps_allocation_unit = 2*sizeof(void*);
 static_assert ((rps_allocation_unit & (rps_allocation_unit-1)) == 0,
@@ -1369,7 +1487,7 @@ static_assert(sizeof(Rps_ObjectRef) == sizeof(void*),
 static_assert(alignof(Rps_ObjectRef) == alignof(void*),
               "Rps_ObjectRef should have the alignment of a word");
 
-extern "C" void rps_print_objectref(Rps_ObjectRef ob);
+
 
 // we could code Rps_ObjectFromOidRef(&_,"_41OFI3r0S1t03qdB2E") instead of rpskob_41OFI3r0S1t03qdB2E
 class Rps_ObjectFromOidRef : public Rps_ObjectRef
@@ -1402,6 +1520,11 @@ enum class Rps_Type : std::int16_t
   CallFrame = std::numeric_limits<std::int16_t>::min(),
   ////////////////
   /// payloads are negative, below -1
+  PaylFltkRefWidget = -26,
+  PaylFltkWidget = -25,
+  PaylFltkWindow = -24,
+  PaylFltkThing = -23,
+  PaylCplusplusGen = -22,    // for C++ code generation
   PaylLightCodeGen = -21,    // for GNU lightning code generation
   PaylEnviron = -20,         // for environments
   PaylObjMap = -19,          // for object maps
@@ -1687,9 +1810,9 @@ public:
 
 
 /// printing routines likely to be called from GDB debugger
-extern "C" void rps_print_value(const Rps_Value val);
-extern "C" void rps_print_ptr_value(const void*v);
-
+extern "C" void rps_print_value(const Rps_Value val); // in values_rps.cc
+extern "C" void rps_print_objectref(Rps_ObjectRef ob); // in utilities_rps.cc
+extern "C" void rps_print_ptr_value(const void*v); // in values_rps.cc
 extern "C" void rps_limited_print_value(const Rps_Value val, unsigned depth, unsigned maxdepth);
 extern "C" void rps_limited_print_ptr_value(const void*v, unsigned depth, unsigned maxdepth);
 
@@ -1783,6 +1906,7 @@ public:
   inline Rps_StringValue(const Rps_Value val);
   inline Rps_StringValue(const Rps_String* strv);
   inline Rps_StringValue(std::nullptr_t);
+  inline Rps_StringValue() : Rps_StringValue(nullptr) {};
 }; // end class Rps_StringValue
 
 class Rps_DoubleValue : public Rps_Value
@@ -2157,6 +2281,11 @@ std::ostream& operator << (std::ostream& out, const Rps_Backtracer& rpb)
   Rps_Backtracer(Rps_Backtracer::FullOut_Tag{},__FILE__,__LINE__,(Skip),(Name),(std::ostream*)nullptr)
 
 ////////////////////////////////////////////////////// garbage collector
+/* Our top level function to call the garbage collector; the optional
+   argument C++ std::function is marking more local data, e.g. calling
+   Rps_ObjectRef::gc_mark or Rps_Value::gc_mark or some
+   Rps_GarbageCollector::mark??? routine. See comments or warnings in
+   garbcoll_rps.cc file... */
 extern "C" void rps_garbage_collect(std::function<void(Rps_GarbageCollector*)>* fun=nullptr);
 class Rps_GarbageCollector
 {
@@ -2423,6 +2552,21 @@ public:
     return h;
   };
 };                              // end of Rps_LazyHashedZoneValue
+
+
+
+
+////////////////////////////////////////////////// file path utilities
+/** Given a shell pattern like foo/x*.h and a directory path like
+   /usr/include:/usr/local/include find a readable plain file path;
+   tilde patterns ~joe are expanded and $XX are expanded but not command
+   line substitution like $(ls -lt *foo|head -1); for example
+   rps_glob_plain_path("sys/stat.h",
+   "/usr/include/:/usr/include/x86-64-linux/gnu/") would return
+   "/usr/include/sys/stat.h" on my Linux desktop. If no file is found,
+   the empty string is returned. */
+std::string rps_glob_plain_file_path(const char*shellpat, const char*dirpath);
+
 //////////////////////////////////////////////////////////// immutable strings
 
 // compute a long hash in ht[0] and ht[1]. Return the number of UTF-8
@@ -2590,15 +2734,15 @@ struct Rps_ChunkData_st;
 
 extern "C" void rps_parsrepl_failing_at(const char*fil, int lin, int cnt, const std::string&failstr);
 
-#define RPS_PARSREPL_FAILURE_AT(Fram,Out,Fil,Lin,Cnt) do {  \
-    std::ostringstream _failstream_##Lin;     \
-    _failstream_##Lin << Out << " ~#" << Cnt << std::endl;  \
-    Rps_Backtracer backtr##Lin(Rps_Backtracer::FullOut_Tag{}, \
-             (Fil),(Lin),1,     \
-             "ParsReplFailing",   \
-             &_failstream_##Lin);   \
-    rps_parsrepl_failing_at(Fil,Lin,Cnt,      \
-          _failstream_##Lin.str());   \
+#define RPS_PARSREPL_FAILURE_AT(Fram,Out,Fil,Lin,Cnt) do {     \
+    std::ostringstream _failstream_##Lin;                      \
+    _failstream_##Lin << Out << " ~#" << Cnt << std::endl;     \
+    Rps_Backtracer backtr##Lin(Rps_Backtracer::FullOut_Tag{},  \
+             (Fil),(Lin),1,                                    \
+             "ParsReplFailing",                                \
+             &_failstream_##Lin);                              \
+    rps_parsrepl_failing_at(Fil,Lin,Cnt,                       \
+          _failstream_##Lin.str());                            \
 } while(0)
 
 #define RPS_PARSREPL_FAILURE(Fram,Out) \
@@ -2608,6 +2752,10 @@ extern "C" void rps_do_one_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef o
                                         const std::string&cmd,
                                         const char*title=nullptr);
 
+
+
+
+////////////////////////////////// token sources are for lexing
 class Rps_TokenSource           // this is *not* a value .....
 {
   friend class Rps_LexTokenValue;
@@ -2796,8 +2944,11 @@ inline std::ostream& operator << (std::ostream&out, Rps_TokenSource& toksrc)
 class Rps_CinTokenSource : public Rps_TokenSource
 {
 public:
-  virtual void output(std::ostream&out) const
+  virtual void output(std::ostream&out, unsigned depth, unsigned maxdepth) const
   {
+    if (depth > maxdepth && &out != &std::cout && &out != &std::cerr && &out != &std::clog)
+      RPS_WARNOUT("Rps_CinTokenSource " << name()
+                  << " depth=" << depth << " greater than maxdepth=" << maxdepth);
     out << "CinTokenSource" << name() << '@' << position_str() << " tok.cnt:" << token_count();
   };
   Rps_CinTokenSource();
@@ -2812,8 +2963,11 @@ class Rps_StreamTokenSource : public Rps_TokenSource
   std::ifstream toksrc_input_stream;
 public:
   Rps_StreamTokenSource(std::string path);
-  virtual void output(std::ostream&out) const
+  virtual void output(std::ostream&out, unsigned depth, unsigned maxdepth) const
   {
+    if (depth > maxdepth)
+      RPS_WARNOUT("Rps_StreamTokenSource " << name()
+                  << " depth=" << depth << " greater than maxdepth=" << maxdepth);
     out << "StreamTokenSource" << name() << '@' << position_str() << " tok.cnt:" << token_count();
   };
   virtual ~Rps_StreamTokenSource();
@@ -2839,6 +2993,24 @@ public:
   virtual void display(std::ostream&out) const;
 };                                                            // end Rps_StringTokenSource
 
+class Rps_MemoryFileTokenSource : public Rps_TokenSource
+{
+  const std::string toksrcmfil_path;
+  const char*toksrcmfil_start; // page-aligned, in memory
+  const char*toksrcmfil_line;  // pointer to start of current line
+  const char*toksrcmfil_end; // the end of the file as mmap-ed
+  const char*toksrcmfil_nextpage; // the next virtual memory page (page-aligned)
+public:
+  Rps_MemoryFileTokenSource(const std::string path);
+  virtual void output(std::ostream&out, unsigned depth, unsigned maxdepth) const;
+  virtual  ~Rps_MemoryFileTokenSource();
+  virtual bool get_line();
+  const std::string path() const
+  {
+    return toksrcmfil_path;
+  };
+  virtual void display(std::ostream&out) const;
+};        // end Rps_MemoryFileTokenSource
 
 
 constexpr const unsigned rps_chunkdata_magicnum = 0x2fa19e6d; // 799121005
@@ -2920,7 +3092,7 @@ public:
   };
   virtual bool equal(const Rps_ZoneValue&zv) const;
   virtual bool less(const Rps_ZoneValue&zv) const;
-#warning probably obsolete Rps_LexTokenZone::{lexical_line_getter_fun,tokenize} functions
+#pragma message "probably obsolete Rps_LexTokenZone::{lexical_line_getter_fun,tokenize} functions"
   /// The signature of a function to retrieve the next line....  on
   /// purpose close to existing rps_repl_get_next_line in our C++ file
   /// repl_rps.cc...
@@ -3131,6 +3303,7 @@ public:
   void append_components(const std::vector<Rps_Value>&compvec);
   unsigned nb_components(Rps_CallFrame*stkf) const;
   Rps_Value component_at (Rps_CallFrame*stkf, int rk, bool dontfail=false) const;
+  Rps_Value replace_component_at ([[maybe_unused]] Rps_CallFrame*stkf, int rk,  Rps_Value comp0, bool dontfail=false);
   Rps_Value instance_from_components(Rps_CallFrame*stkf, Rps_ObjectRef obinstclass) const;
   // get atomic fields
   inline double get_mtime(void) const;
@@ -3618,7 +3791,10 @@ public:
   {
     return cnt();
   };
-#warning Rps_TupleOb very incomplete
+#pragma message "perhaps Rps_TupleOb is incomplete"
+  /// maybe we might need specialized and faster
+  /// make1(Rps_ObjectRef) make2(Rps_ObjectRef,Rps_ObjectRef)
+  /// and make3(Rps_ObjectRef,Rps_ObjectRef,Rps_ObjectRef) etc etc
 };// end of Rps_TupleOb
 
 
@@ -4031,6 +4207,7 @@ public:
             || (xdata != nullptr
                 && (((intptr_t)xdata & (alignof(intptr_t)-1)) == 0)));
     assert (size < _cfram_max_size_);
+    rps_curthread_callframe = this;
   }; // end Rps_ProtoCallFrame constructor
   ~Rps_ProtoCallFrame()
   {
@@ -4039,6 +4216,7 @@ public:
         assert (cfram_xtradata != nullptr);
         memset ((void*)cfram_xtradata, 0, cfram_size*sizeof(intptr_t));
       }
+    rps_curthread_callframe = cfram_prev;
     cfram_xtradata = nullptr;
     cfram_descr = nullptr;
     cfram_prev = nullptr;
@@ -4124,7 +4302,7 @@ public:
     for (Rps_CallFrame const*curf = this; curf && is_good_call_frame(curf); curf=curf->cfram_prev) d++;
     return d;
   };
-  /// TODO: implement fully in cmldrepl_rps.cc file some
+  /// TODO: implement fully in cmdrepl_rps.cc file some
   /// evaluate_repl_expr(Rps_Value expr,Rps_ObjectRef envob) member
   /// function here.  can throw some runtime exception on failure...
   Rps_TwoValues evaluate_repl_expr(Rps_Value expr,Rps_ObjectRef envob);
@@ -4191,11 +4369,11 @@ template <unsigned WordSize> class Rps_SizedCallFrame
   void* cfram_word_data[WordSize];
 public:
   typedef Rps_SizedCallFrame<WordSize> This_frame;
-  Rps_SizedCallFrame<WordSize> (Rps_ObjectRef obdescr=nullptr, Rps_CallFrame*prev=nullptr)
+  Rps_SizedCallFrame (Rps_ObjectRef obdescr=nullptr, Rps_CallFrame*prev=nullptr)
     :  Rps_ProtoCallFrame(WordSize, cfram_word_data, obdescr, prev)
   {
   };
-  ~Rps_SizedCallFrame<WordSize>()
+  ~Rps_SizedCallFrame()
   {
   };
 };                              // end of Rps_SizedCallFrame template
@@ -4219,11 +4397,11 @@ public:
   {
     return cfram_fields;
   };
-  Rps_FieldedCallFrame<FrameFields>  (Rps_ObjectRef obdescr=nullptr, Rps_CallFrame*prev=nullptr)
+  Rps_FieldedCallFrame (Rps_ObjectRef obdescr=nullptr, Rps_CallFrame*prev=nullptr)
     :  Rps_ProtoCallFrame(sizeof(FrameFields)/sizeof(void*), &cfram_fields, obdescr, prev)
   {
   };
-  ~Rps_FieldedCallFrame<FrameFields> ()
+  ~Rps_FieldedCallFrame ()
   {
   };
 };                              // end of Rps_FieldedCallFrame template
@@ -5047,18 +5225,47 @@ public:
 // so using $REFPERSYS_HOME or $HOME
 #define RPS_USER_MANIFEST_JSON ".refpersys.json"
 
+/***************************************************************
+ * ROOT OBJECTS
+ *
+ * The root objects are GC-scanned and GC-marked at every garbage
+ * collection.  They are listed in generated/rps-roots.hh which is
+ * written at dump time and contains one RPS_INSTALL_ROOT_OB macro
+ * invocation line per root object. For example the agenda object of
+ * oid _1aGtWm38Vw701jDhZn is installed by a C++ line like
+ * rps_install_root_ob(_1aGtWm38Vw701jDhZn) with the C++ macro name in
+ * capital.
+ *
+ * Each root object is pointed by an extern "C" global C++ variable
+ * whose prefix is rps_rootob. For example
+ * rps_rootob_1aGtWm38Vw701jDhZn is the_agenda root object, and should
+ * be refered by RPS_ROOTOB(_1aGtWm38Vw701jDhZn) in C++ code (it is an
+ * Rps_ObjectRef with a _optr inside).  The actual root object is
+ * allocated early at load time in Rps_Loader::initialize_root_objects
+ * Adding a root object means registering it in some global internal
+ * structure, and removing it means unregistering it (but the object
+ * itself remains in memory).  We want to avoid having too many root
+ * objects.
+ ***************************************************************/
 //// global roots for garbage collection and persistence
 /// the called function cannot add, remove or query the global root set
 extern "C" void rps_each_root_object (const std::function<void(Rps_ObjectRef)>&fun);
 extern "C" void rps_add_root_object (const Rps_ObjectRef);
+/// Both rps_remove_root_object and rps_is_root_object return false if
+/// argument is not a root object.  Of course rps_remove_root_object
+/// also removes it.
 extern "C" bool rps_remove_root_object (const Rps_ObjectRef);
 extern "C" bool rps_is_root_object (const Rps_ObjectRef);
 extern "C" std::set<Rps_ObjectRef> rps_set_root_objects(void);
 extern "C" unsigned rps_nb_root_objects(void);
 extern "C" void rps_initialize_roots_after_loading (Rps_Loader*ld);
+extern "C" unsigned rps_hardcoded_number_of_roots(void);
+
+extern "C" void rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef obconst);
+extern "C" void rps_remove_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef obconst);
 extern "C" void rps_initialize_symbols_after_loading (Rps_Loader*ld);
 
-extern "C" unsigned rps_hardcoded_number_of_roots(void);
+
 extern "C" unsigned rps_hardcoded_number_of_symbols(void);
 extern "C" unsigned rps_hardcoded_number_of_constants(void);
 
@@ -5099,9 +5306,11 @@ extern "C" void rps_garbcoll_application(Rps_GarbageCollector&gc);
 
 /// approved on Whatsapp by Abishek Chakravarti on July, 24, 2023
 extern "C" bool rps_generate_lightning_code(Rps_CallFrame*callerframe,
-    Rps_ObjectRef obmodule);
+    Rps_ObjectRef obmodule,
+    Rps_Value genparamv=nullptr);
 extern "C" bool rps_generate_cplusplus_code(Rps_CallFrame*callerframe,
-    Rps_ObjectRef obmodule);
+    Rps_ObjectRef obmodule,
+    Rps_Value genparamv=nullptr);
 
 
 ////................................................................
@@ -5256,7 +5465,6 @@ extern "C" void rps_run_agenda_mechanism(int nbjobs);
 /// stop the agenda mechanism
 extern "C" void rps_stop_agenda_mechanism(void);
 
-extern "C" void rps_initialize_event_loop(void);
 /****
  * The agenda is a unique and central data-structure (and RefPerSys
  * object `the_agenda` with a `Rps_PayloadAgenda` payload) managing
@@ -5276,9 +5484,10 @@ class Rps_Agenda   /// all member functions are static...
   friend rpsldpysig_t rpsldpy_agenda;
   friend void rps_run_agenda_mechanism(int nbjobs);
   friend void rps_stop_agenda_mechanism(void);
-  static double agenda_timeout; // elapsed real time when agenda
+  // elapsed real time when agenda
   // should stop running, related to
-  // --run-deplay option...
+  // --run-delay program option...
+  static double agenda_timeout;
 public:
   enum agenda_prio_en
   {
@@ -5326,6 +5535,7 @@ private:
   static std::atomic<workthread_state_en> agenda_work_thread_state_[RPS_NBJOBS_MAX+2];
   /// the call frames below makes sense only during garbage collection....
   static std::atomic<Rps_CallFrame*> agenda_work_gc_callframe_[RPS_NBJOBS_MAX+2];
+  static std::atomic<Rps_CallFrame**> agenda_work_gc_current_callframe_ptr[RPS_NBJOBS_MAX+2];
 };                              // end class Rps_Agenda
 
 
@@ -5335,6 +5545,10 @@ class Rps_PayloadAgenda : public Rps_Payload
 {
   friend class Rps_Agenda;
   friend rpsldpysig_t rpsldpy_agenda;
+  /// What is really used is the attributes in the_agenda singleton
+  /// object.  Conceptually the values inside Rps_Agenda above are the
+  /// fields of the unique Rps_PayloadAgenda tied to the_agenda root object
+  /// of objid _1aGtWm38Vw701jDhZn "the_agenda"∈agenda
 public:
   inline Rps_PayloadAgenda(Rps_ObjectZone*owner);
   inline Rps_PayloadAgenda(Rps_ObjectZone*owner, Rps_Loader*ld);

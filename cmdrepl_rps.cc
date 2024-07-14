@@ -33,14 +33,14 @@
 
 #include "refpersys.hh"
 
-// #include "readline/readline.h"
-// #include "readline/history.h"
-
 extern "C" const char rps_cmdrepl_gitid[];
 const char rps_repl_gitid[]= RPS_GITID;
 
 extern "C" const char rps_cmdrepl_date[];
 const char rps_cmdrepl_date[]= __DATE__;
+
+extern "C" const char rps_cmdrepl_shortgitid[];
+const char rps_repl_shortgitid[]= RPS_SHORTGITID;
 
 // internal code to evaluate composite expressions like arithmetic, conditionals, etc...
 static Rps_TwoValues
@@ -137,10 +137,17 @@ rps_full_evaluate_repl_expr(Rps_CallFrame*callframe, Rps_Value exprarg, Rps_Obje
       RPS_REPLEVAL_FAIL("*check-fail*","never happens no envob"
                         << _f.envob);
     };
+  std::lock_guard gu(*_f.envob->objmtxptr());
   if (!_f.envob->is_instance_of(RPS_ROOT_OB(_5LMLyzRp6kq04AMM8a))) //environment∈class
     {
       RPS_REPLEVAL_FAIL("bad environment","The envob " << _f.envob << " of class "
                         << _f.envob->get_class() << " is not a valid environment");
+    };
+  auto envpayl = _f.envob->get_dynamic_payload<Rps_PayloadEnvironment>();
+  if (!envpayl)
+    {
+      RPS_REPLEVAL_FAIL("bad environment payload","The envob " << _f.envob << " of class "
+                        << _f.envob->get_class() << " without environment payload");
     };
   /* environments should have bindings, probably with Rps_PayloadEnvironment */
 #warning rps_full_evaluate_repl_expr should check that envob is an environment, with bindings and optional parent env....
@@ -458,7 +465,6 @@ rps_environment_get_shallow_bound_value(Rps_ObjectRef envob, Rps_ObjectRef varob
         *pmissing = true;
       return nullptr;
     };
-  bool missing= false;
   return paylenv->get_obmap(varob, nullptr, pmissing);
 } // end rps_environment_get_shallow_bound_value
 
@@ -492,7 +498,6 @@ rps_environment_find_binding_depth(Rps_ObjectRef envob, Rps_ObjectRef varob)
         isgoodenv = true;
       if (!isgoodenv)
         return -1;
-      bool missing = true;
       auto paylenv = envob->get_dynamic_payload<Rps_PayloadEnvironment>();
       if (!paylenv)
         return -1;
@@ -802,7 +807,7 @@ Rps_CallFrame::evaluate_repl_expr1(Rps_Value expr, Rps_ObjectRef envob)
 /* C++ closure _61pgHb5KRq600RLnKD for REPL command dump parsing*/
 extern "C" rps_applyingfun_t rpsapply_61pgHb5KRq600RLnKD;
 Rps_TwoValues
-rpsapply_61pgHb5KRq600RLnKD(Rps_CallFrame*callerframe,
+rpsapply_61pgHb5KRq600RLnKD(Rps_CallFrame*callerframe, // REPL dump command
                             const Rps_Value arg0,
                             [[maybe_unused]] const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
@@ -1072,7 +1077,7 @@ void rps_show_object_for_repl(Rps_CallFrame*callerframe,
 /* C++ function _7WsQyJK6lty02uz5KT for REPL command show*/
 extern "C" rps_applyingfun_t rpsapply_7WsQyJK6lty02uz5KT;
 Rps_TwoValues
-rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe,
+rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe, // REPL command show expr
                             const Rps_Value arg0,
                             const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
@@ -1083,6 +1088,8 @@ rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe,
   if (!descoid) descoid=Rps_Id("_7WsQyJK6lty02uz5KT");
   RPS_LOCALFRAME(/*descr:*/Rps_ObjectRef::really_find_object_by_oid(descoid),
                            callerframe,
+                           Rps_Value a0;
+                           Rps_Value a1;
                            Rps_ObjectRef replcmdob;
                            Rps_ObjectRef evalenvob;
                            Rps_ObjectRef shownob;
@@ -1096,27 +1103,28 @@ rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe,
   _.set_additional_gc_marker([&](Rps_GarbageCollector*gc)
   {
   });
-  RPS_DEBUG_LOG(CMD, "REPL command show start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << ";  arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) <<std::endl
-                << ";  arg2=" << arg2
-                << "∈" << arg2.compute_class(&_)
+  _f.a0 = arg0;
+  _f.a1 = arg1;
+  RPS_DEBUG_LOG(CMD, "CMD command show start a0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << ";" << std::endl << " a1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) <<std::endl
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-  RPS_DEBUG_LOG(REPL, "REPL command show start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << ";  arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) <<std::endl
-                << ";  arg2=" << arg2
-                << "∈" << arg2.compute_class(&_)
-                << " from " << std::endl
-                << Rps_ShowCallFrame(&_));
+  RPS_DEBUG_LOG(REPL, "REPL command show start a0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << ";  a1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) <<std::endl
+                << Rps_ShowCallFrame(&_)
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "%command show°_7WsQyJK6lty02uz5KT"));
+  _f.replcmdob = _f.a0.as_object();
+  _f.lextokv = _f.a1;
 #warning REPL command show may need some local Rps_TokenSource
-  _f.replcmdob = arg0.to_object();
-  _f.lextokv = arg1;
-  RPS_DEBUG_LOG(REPL, "REPL command show°_7WsQyJK6/started replcmdob:" << _f.replcmdob << " lextokv:" << _f.lextokv
-                << std::endl << RPS_FULL_BACKTRACE_HERE(1, "%command show°_7WsQyJK6lty02uz5KT"));
+  RPS_DEBUG_LOG(REPL, "REPL command show°_7WsQyJK6/started replcmdob:"
+                << _f.replcmdob << " lextokv:" << _f.lextokv
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "%command show°_7WsQyJK6lty02uz5KT"));
   RPS_ASSERT(_.call_frame_depth() < 7);
   RPS_DEBUG_LOG(CMD, "REPL command show framedepth=" << _.call_frame_depth()
                 << " lextokv=" << _f.lextokv
@@ -1236,7 +1244,7 @@ rps_get_first_repl_environment(void)
 /* C++ function _2TZNwgyOdVd001uasl for REPL command help*/
 extern "C" rps_applyingfun_t rpsapply_2TZNwgyOdVd001uasl;
 Rps_TwoValues
-rpsapply_2TZNwgyOdVd001uasl(Rps_CallFrame*callerframe,
+rpsapply_2TZNwgyOdVd001uasl(Rps_CallFrame*callerframe, /// REPL command help
                             const Rps_Value arg0,
                             const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
@@ -1247,19 +1255,53 @@ rpsapply_2TZNwgyOdVd001uasl(Rps_CallFrame*callerframe,
   if (!descoid) descoid=Rps_Id("_2TZNwgyOdVd001uasl");
   RPS_LOCALFRAME(/*descr:*/Rps_ObjectRef::really_find_object_by_oid(descoid),
                            callerframe,
+                           Rps_Value a0;
+                           Rps_Value a1;
+                           Rps_ObjectRef cmdob;
+                           Rps_Value tokenv;
+                           Rps_ObjectRef obdictcmd;
+                           Rps_Value curcmdv;
                 );
-  RPS_DEBUG_LOG(CMD, "REPL command help start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  _f.a0 = arg0;
+  _f.a1 = arg1;
+  _f.obdictcmd = RPS_ROOT_OB(_5dkRQtwGUHs02MVQT0);
+  RPS_DEBUG_LOG(CMD, "REPL command help start a0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << " a1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) << std::endl
+                << " obdictcmd=" << _f.obdictcmd
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-  RPS_DEBUG_LOG(REPL, "REPL command help start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
-                << " from " << std::endl
-                << Rps_ShowCallFrame(&_));
+  if (!RPS_DEBUG_ENABLED(CMD))
+    {
+      RPS_DEBUG_LOG(REPL, "REPL command help° start 0=" << _f.a0
+                    << "∈" << _f.a0.compute_class(&_)
+                    << " a1=" << _f.a1
+                    << "∈" << _f.a1.compute_class(&_) << std::endl
+                    << " arg2=" << arg2 << " arg3=" << arg3
+                    << " obdictcmd=" << _f.obdictcmd
+                    << (restargs?" restargs=":" no restargs:")
+                    << (restargs?(*restargs):std::vector<Rps_Value>())
+                    << " from " << std::endl
+                    << RPS_FULL_BACKTRACE_HERE(1, "REPL command help°"));
+    };
+  _f.cmdob = _f.a0.as_object();
+  RPS_ASSERT(_f.obdictcmd);
+  std::lock_guard<std::recursive_mutex> gu(*_f.obdictcmd->objmtxptr());
+  auto payldict = _f.obdictcmd->get_dynamic_payload<Rps_PayloadStringDict>();
+  RPS_ASSERT(payldict);
+  payldict->iterate_with_callframe(&_, [&](Rps_CallFrame*cf,
+                                   const std::string&name,
+                                   const Rps_Value val)
+  {
+    /* TODO: we probably need some internal rps_LOCALFRAME right here! */
+#warning incomplete code inside rpsapply_2TZNwgyOdVd001uasl for REPL command help
+    _f.curcmdv = val;
+    if (_f.curcmdv.is_object())
+      {
+      }
+    return false;
+  });
 #warning incomplete rpsapply_2TZNwgyOdVd001uasl for REPL command help
   RPS_WARNOUT("incomplete rpsapply_2TZNwgyOdVd001uasl for REPL command help from " << std::endl
               << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_2TZNwgyOdVd001uasl for REPL command help"));
@@ -1271,10 +1313,10 @@ rpsapply_2TZNwgyOdVd001uasl(Rps_CallFrame*callerframe,
 /* C++ function _28DGtmXCyOX02AuPLd for REPL command put*/
 extern "C" rps_applyingfun_t rpsapply_28DGtmXCyOX02AuPLd;
 Rps_TwoValues
-rpsapply_28DGtmXCyOX02AuPLd(Rps_CallFrame*callerframe,
+rpsapply_28DGtmXCyOX02AuPLd(Rps_CallFrame*callerframe, // REPL command put dest index newval
                             const Rps_Value arg0,
                             const Rps_Value arg1,
-                            [[maybe_unused]] const Rps_Value arg2,
+                            const Rps_Value arg2,
                             [[maybe_unused]] const Rps_Value arg3,
                             [[maybe_unused]] const std::vector<Rps_Value>* restargs)
 {
@@ -1282,22 +1324,94 @@ rpsapply_28DGtmXCyOX02AuPLd(Rps_CallFrame*callerframe,
   if (!descoid) descoid=Rps_Id("_28DGtmXCyOX02AuPLd");
   RPS_LOCALFRAME(/*descr:*/Rps_ObjectRef::really_find_object_by_oid(descoid),
                            callerframe,
+                           Rps_Value a0;
+                           Rps_Value a1;
+                           Rps_Value a2;
+                           Rps_ObjectRef ob0;
+                           Rps_ObjectRef ob1;
+                           Rps_ObjectRef obenv;
+                           Rps_ObjectRef obdest;
+                           Rps_ObjectRef obindex;
+                           Rps_Value vdest;
+                           Rps_Value vindex;
+                           Rps_Value vnewval;
+                           Rps_Value voldval;
                 );
-  RPS_DEBUG_LOG(CMD, "REPL command put start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  _f.a0 = arg0;
+  _f.a1 = arg1;
+  _f.a2 = arg2;
+  _f.obenv = rps_get_first_repl_environment();
+  RPS_DEBUG_LOG(CMD, "REPL command put start arg0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << " arg1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) << std::endl
+                << " arg2=" << _f.a2
+                << "∈" << _f.a2.compute_class(&_) << std::endl
+                << " obenv:" << _f.obenv
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-  RPS_DEBUG_LOG(REPL, "REPL command put start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  RPS_DEBUG_LOG(REPL, "REPL command put start arg0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << " arg1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) << std::endl
+                << " arg2=" << _f.a2
+                << "∈" << _f.a2.compute_class(&_) << std::endl
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-
+  _f.vdest = rps_simple_evaluate_repl_expr(&_, _f.a0, _f.obenv);
+  RPS_DEBUG_LOG(REPL, "REPL command put destination vdest=" << _f.vdest);
+  _f.obdest = _f.vdest.as_object();
+  if (!_f.obdest)
+    {
+      RPS_WARNOUT("in REPL command put the destination vdest=" << _f.vdest << " is not an object" << std::endl
+                  << "index expression being a1=" << _f.a1);
+      return {nullptr,nullptr};
+    }
+  std::lock_guard<std::recursive_mutex> guobdest(*_f.obdest->objmtxptr());
+  _f.vindex = rps_simple_evaluate_repl_expr(&_, _f.a1, _f.obenv);
+  RPS_DEBUG_LOG(REPL, "REPL command put destination vdest=" << _f.vdest << " index vindex=" << _f.vindex);
+  _f.vnewval = rps_simple_evaluate_repl_expr(&_, _f.a2, _f.obenv);
+  RPS_DEBUG_LOG(REPL, "REPL command put destination vdest=" << _f.vdest  << " index vindex=" << _f.vindex
+                << " newvalue vnewval=" << _f.vnewval);
+  if (_f.vindex.is_object())
+    {
+      _f.obindex = _f.vindex.as_object();
+      if (_f.vnewval)
+        {
+          _f.obdest->put_attr(_f.obindex, _f.vnewval);
+          RPS_INFORMOUT("REPL command put obdest=" << _f.obdest << " attribute:" << _f.obindex
+                        << " new value:" << _f.vnewval);
+          return {_f.obdest, _f.vnewval};
+        }
+      else
+        {
+          _f.voldval = _f.obdest->get_attr1(&_, _f.obindex);
+          _f.obdest->remove_attr(_f.obindex);
+          RPS_INFORMOUT("REPL command put obdest=" << _f.obdest
+                        << " removed attribute:" << _f.obindex
+                        << " old value was:" << _f.voldval);
+          return {_f.obdest, _f.voldval};
+        }
+    }
+  else if (_f.vindex.is_int())
+    {
+      intptr_t ix = _f.vindex.as_int();
+      _f.voldval = _f.obdest->component_at (&_, (int)ix);
+      _f.obdest->replace_component_at(&_, (int)ix, _f.vnewval);
+      RPS_INFORMOUT("REPL command replaced in obdest=" << _f.obdest << " at index " << ix
+                    << " component by " << _f.vnewval << " old value was " << _f.voldval);
+      return {_f.obdest, _f.voldval};
+    }
+  else
+    {
+      RPS_WARNOUT("in REPL command put obdest=" << _f.obdest  << std::endl
+                  << "with invalid index (not object or integer) being vindex=" << _f.vindex);
+      return {nullptr,nullptr};
+    }
 #warning incomplete rpsapply_28DGtmXCyOX02AuPLd for REPL command put
-  RPS_WARNOUT("incomplete rpsapply_28DGtmXCyOX02AuPLd for REPL command put from " << std::endl
+  RPS_WARNOUT("rpsapply_28DGtmXCyOX02AuPLd for REPL command put obdest=" << _f.obdest
+              << " index=" << _f.vindex
+              << " called from " << std::endl
               << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_28DGtmXCyOX02AuPLd for REPL command put"));
   return {nullptr,nullptr};
 } //end of rpsapply_28DGtmXCyOX02AuPLd for REPL command put
@@ -1307,7 +1421,7 @@ rpsapply_28DGtmXCyOX02AuPLd(Rps_CallFrame*callerframe,
 /* C++ function _09ehnxiXQKo006cZer for REPL command remove*/
 extern "C" rps_applyingfun_t rpsapply_09ehnxiXQKo006cZer;
 Rps_TwoValues
-rpsapply_09ehnxiXQKo006cZer(Rps_CallFrame*callerframe,
+rpsapply_09ehnxiXQKo006cZer(Rps_CallFrame*callerframe, // REPL command remove dest index
                             const Rps_Value arg0,
                             const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
@@ -1318,19 +1432,44 @@ rpsapply_09ehnxiXQKo006cZer(Rps_CallFrame*callerframe,
   if (!descoid) descoid=Rps_Id("_09ehnxiXQKo006cZer");
   RPS_LOCALFRAME(/*descr:*/Rps_ObjectRef::really_find_object_by_oid(descoid),
                            callerframe,
+                           Rps_Value a0;
+                           Rps_Value a1;
+                           Rps_Value destv;
+                           Rps_Value indexv;
+                           Rps_ObjectRef obenv;
+                           Rps_ObjectRef obdest;
+                           Rps_ObjectRef obattr;
                 );
-  RPS_DEBUG_LOG(CMD, "REPL command remove start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  _f.a0 = arg0;
+  _f.a1 = arg1;
+  _f.obenv = rps_get_first_repl_environment();
+  RPS_DEBUG_LOG(CMD, "REPL command remove start arg0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << " arg1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) << std::endl
+                << " obenv="<< _f.obenv
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-  RPS_DEBUG_LOG(REPL, "REPL command remove start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  RPS_DEBUG_LOG(REPL, "REPL command remove start arg0=" << _f.a0
+                << "∈" << _f.a0.compute_class(&_)
+                << " arg1=" << _f.a1
+                << "∈" << _f.a1.compute_class(&_) << std::endl
+                << " obenv="<< _f.obenv
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
+  _f.destv = rps_simple_evaluate_repl_expr(&_, _f.a0, _f.obenv);
+  RPS_DEBUG_LOG(REPL, "REPL command remove destination destv=" << _f.destv);
+  _f.obdest = _f.destv.as_object();
+  if (!_f.obdest)
+    {
+      RPS_WARNOUT("in REPL command remove the destination destv="
+                  << _f.destv << " is not an object" << std::endl
+                  << "index expression being a1=" << _f.a1);
+      return {nullptr,nullptr};
+    }
+  std::lock_guard<std::recursive_mutex> guobdest(*_f.obdest->objmtxptr());
+  _f.indexv = rps_simple_evaluate_repl_expr(&_, _f.a1, _f.obenv);
+  RPS_DEBUG_LOG(REPL, "REPL command remove destination destv=" << _f.destv << " indexv=" << _f.indexv);
 #warning incomplete rpsapply_09ehnxiXQKo006cZer for REPL command remove
   RPS_WARNOUT("incomplete rpsapply_09ehnxiXQKo006cZer for REPL command remove from " << std::endl
               << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_09ehnxiXQKo006cZer for REPL command remove"));
@@ -1342,7 +1481,7 @@ rpsapply_09ehnxiXQKo006cZer(Rps_CallFrame*callerframe,
 /* C++ function _9LCCu7TQI0Z0166mw3 for REPL command append*/
 extern "C" rps_applyingfun_t rpsapply_9LCCu7TQI0Z0166mw3;
 Rps_TwoValues
-rpsapply_9LCCu7TQI0Z0166mw3(Rps_CallFrame*callerframe,
+rpsapply_9LCCu7TQI0Z0166mw3(Rps_CallFrame*callerframe, /// REPL command append dest comp
                             const Rps_Value arg0,
                             const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
@@ -1353,18 +1492,22 @@ rpsapply_9LCCu7TQI0Z0166mw3(Rps_CallFrame*callerframe,
   if (!descoid) descoid=Rps_Id("_9LCCu7TQI0Z0166mw3");
   RPS_LOCALFRAME(/*descr:*/Rps_ObjectRef::really_find_object_by_oid(descoid),
                            callerframe,
+                           Rps_Value a0dest;
+                           Rps_Value a1comp;
                 );
-  RPS_DEBUG_LOG(CMD, "REPL command append start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_)
+  _f.a0dest = arg0;
+  _f.a1comp = arg1;
+  RPS_DEBUG_LOG(CMD, "REPL command append start a0dest=" << _f.a0dest
+                << "∈" << _f.a0dest.compute_class(&_)
+                << " a1comp=" << _f.a1comp
+                << "∈" << _f.a1comp.compute_class(&_)
                 << std::endl
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-  RPS_DEBUG_LOG(REPL, "REPL command append start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_)
+  RPS_DEBUG_LOG(REPL, "REPL command append start a0dest=" << _f.a0dest
+                << "∈" << _f.a0dest.compute_class(&_)
+                << " a1comp=" << _f.a1comp
+                << "∈" << _f.a1comp.compute_class(&_)
                 << std::endl
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
@@ -1379,9 +1522,9 @@ rpsapply_9LCCu7TQI0Z0166mw3(Rps_CallFrame*callerframe,
 /* C++ function _982LHCTfHdC02o4a6Q for REPL command add_root*/
 extern "C" rps_applyingfun_t rpsapply_982LHCTfHdC02o4a6Q;
 Rps_TwoValues
-rpsapply_982LHCTfHdC02o4a6Q(Rps_CallFrame*callerframe,
+rpsapply_982LHCTfHdC02o4a6Q(Rps_CallFrame*callerframe, /// REPL command add_root
                             const Rps_Value arg0,
-                            const Rps_Value arg1,
+                            [[maybe_unused]] const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
                             [[maybe_unused]] const Rps_Value arg3,
                             [[maybe_unused]] const std::vector<Rps_Value>* restargs)
@@ -1390,30 +1533,43 @@ rpsapply_982LHCTfHdC02o4a6Q(Rps_CallFrame*callerframe,
   if (!descoid) descoid=Rps_Id("_982LHCTfHdC02o4a6Q");
   RPS_LOCALFRAME(/*descr:*/Rps_ObjectRef::really_find_object_by_oid(descoid),
                            callerframe,
+                           Rps_Value a0rootexp;
+                           Rps_Value rootv;
+                           Rps_ObjectRef obenv;
+                           Rps_ObjectRef obroot;
                 );
-  RPS_DEBUG_LOG(CMD, "REPL command add_root start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  _f.a0rootexp = arg0;
+  _f.obenv = rps_get_first_repl_environment();
+  RPS_DEBUG_LOG(CMD, "REPL command add_root start a0rootexp=" << _f.a0rootexp
+                << "∈" <<_f.a0rootexp.compute_class(&_)
+                << " obenv=" << _f.obenv
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-  RPS_DEBUG_LOG(REPL, "REPL command add_root start arg0=" << arg0
-                << "∈" << arg0.compute_class(&_)
-                << " arg1=" << arg1
-                << "∈" << arg1.compute_class(&_) << std::endl
+  RPS_DEBUG_LOG(REPL, "REPL command add_root start a0rootexp=" << _f.a0rootexp
+                << "∈" << _f.a0rootexp.compute_class(&_)
+                << " obenv=" << _f.obenv
                 << " from " << std::endl
                 << Rps_ShowCallFrame(&_));
-#warning incomplete rpsapply_982LHCTfHdC02o4a6Q for REPL command add_root
-  RPS_WARNOUT("incomplete rpsapply_982LHCTfHdC02o4a6Q for REPL command add_root from " << std::endl
-              << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_982LHCTfHdC02o4a6Q for REPL command add_root"));
-  return {nullptr,nullptr};
+  _f.rootv = rps_simple_evaluate_repl_expr(&_, _f.a0rootexp, _f.obenv);
+  RPS_DEBUG_LOG(REPL, "REPL command add_root rootv=" << _f.rootv);
+  _f.obroot = _f.rootv.as_object();
+  if (!_f.obroot)
+    {
+      RPS_WARNOUT("in REPL command add_root the evaluated rootv="
+                  << _f.rootv << " is not an object" << std::endl);
+      return {nullptr,nullptr};
+    }
+  std::lock_guard<std::recursive_mutex> guobdest(*_f.obroot->objmtxptr());
+  rps_add_root_object(_f.obroot);
+  RPS_INFORMOUT("successfully added new root object " << _f.obroot);
+  return {_f.rootv,nullptr};
 } //end of rpsapply_982LHCTfHdC02o4a6Q for REPL command add_root
 
 
 /* C++ function _2G5DNSyfWoP002Vv6X for REPL command remove_root*/
 extern "C" rps_applyingfun_t rpsapply_2G5DNSyfWoP002Vv6X;
 Rps_TwoValues
-rpsapply_2G5DNSyfWoP002Vv6X(Rps_CallFrame*callerframe,
+rpsapply_2G5DNSyfWoP002Vv6X(Rps_CallFrame*callerframe, // REPL command remove_root
                             const Rps_Value arg0,
                             const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,
@@ -1447,7 +1603,7 @@ rpsapply_2G5DNSyfWoP002Vv6X(Rps_CallFrame*callerframe,
 /* C++ function _55RPnvwSLXz028jyDk for REPL command make_symbol*/
 extern "C" rps_applyingfun_t rpsapply_55RPnvwSLXz028jyDk;
 Rps_TwoValues
-rpsapply_55RPnvwSLXz028jyDk(Rps_CallFrame*callerframe,
+rpsapply_55RPnvwSLXz028jyDk(Rps_CallFrame*callerframe, // REPL make_symbol
                             const Rps_Value arg0,
                             [[maybe_unused]] const Rps_Value arg1,
                             [[maybe_unused]] const Rps_Value arg2,

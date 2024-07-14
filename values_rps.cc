@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2023 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2024 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -38,6 +38,8 @@ const char rps_values_gitid[]= RPS_GITID;
 extern "C" const char rps_values_date[];
 const char rps_values_date[]= __DATE__;
 
+extern "C" const char rps_values_shortgitid[];
+const char rps_values_shortgitid[]= RPS_SHORTGITID;
 
 void
 Rps_Id::to_cbuf24(char cbuf[]) const
@@ -310,6 +312,33 @@ Rps_SetOb::collect(const std::vector<Rps_Value>&vecval)
     }
   return make(elemset);
 } // end of Rps_SetOb::collect with vector
+
+
+
+const Rps_SetOb*
+Rps_SetOb::collect(const std::initializer_list<Rps_Value>&ilval)
+{
+  std::set<Rps_ObjectRef>elemset;
+  for (auto val: ilval)
+    {
+      if (val.is_object())
+        elemset.insert(Rps_ObjectRef(val.as_object()));
+      else if (val.is_tuple())
+        {
+          auto tup = val.as_tuple();
+          for (auto ob: *tup)
+            if (ob)
+              elemset.insert(ob);
+        }
+      else if (val.is_set())
+        {
+          auto set = val.as_set();
+          for (auto ob: *set)
+            elemset.insert(ob);
+        }
+    }
+  return make(elemset);
+} // end of Rps_SetOb::collect with initializer_list
 
 
 
