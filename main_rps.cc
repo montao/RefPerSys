@@ -44,6 +44,8 @@ const char rps_main_date[]= __DATE__;
 extern "C" const char rps_main_shortgitid[];
 const char rps_main_shortgitid[]= RPS_SHORTGITID;
 
+extern "C" char rps_buffer_proc_version[];
+char rps_buffer_proc_version[rps_path_byte_size];
 
 struct utsname rps_utsname;
 
@@ -70,6 +72,11 @@ char*rps_pidfile_path;
 
 extern "C" std::atomic<long> rps_debug_atomic_counter;
 std::atomic<long> rps_debug_atomic_counter;
+
+const char* rps_get_proc_version(void)
+{
+  return rps_buffer_proc_version;
+} // end rps_get_proc_version
 
 long
 rps_incremented_debug_counter(void)
@@ -160,9 +167,11 @@ struct argp_option rps_progoptions[] =
   /* ======= FLTK GUI library ======= */
   {/*name:*/ "fltk", ///
     /*key:*/ RPSPROGOPT_FLTK, ///
-    /*arg:*/ "GUIOPTION", ///
+    /*arg:*/ "GUIPREFERENCES", ///
     /*flags:*/ OPTION_ARG_OPTIONAL, ///
-    /*doc:*/ "pass, if GUIOPTION is given, to FLTK graphical library; enable FLTK graphics.\n", ///
+    /*doc:*/ "pass, if GUIPREFERENCES is given,"
+    " to FLTK graphical library; enable FLTK graphics.\n"
+    "\t see fltk.org for details\n", ///
     /*group:*/0 ///
   },
   /* ======= extra argument ======= */
@@ -215,6 +224,24 @@ struct argp_option rps_progoptions[] =
     /*doc:*/ "Forcibly disable Adress Space Layout Randomization. Might not work.\n", //
     /*group:*/0 ///
   },
+  /* ======= display the full git id ======= */
+  {/*name:*/ "full-git", ///
+    /*key:*/ RPSPROGOPT_FULL_GIT, ///
+    /*arg:*/ nullptr, ///
+    /*flags:*/ 0, ///
+    /*doc:*/ "Output just the full gitid of the binary\n"
+    " (suffixed by + if locally changed)\n", //
+    /*group:*/0 ///
+  },
+  /* ======= display the short suffixed git id ======= */
+  {/*name:*/ "short-git", ///
+    /*key:*/ RPSPROGOPT_SHORT_GIT, ///
+    /*arg:*/ nullptr, ///
+    /*flags:*/ 0, ///
+    /*doc:*/ "Output just the short gitid of the binary\n"
+    " (suffixed by + if locally changed)\n", //
+    /*group:*/0 ///
+  },
   /* ======= without quick tests ======= */
   {/*name:*/ "no-quick-tests", ///
     /*key:*/ RPSPROGOPT_NO_QUICK_TESTS, ///
@@ -248,6 +275,17 @@ struct argp_option rps_progoptions[] =
     /*flags:*/ 0, ///
     /*doc:*/ "pass to the loaded plugin <PLUGIN_NAME> the string <PLUGIN_ARG> "
     "(notice the colon separating them).\n", //
+    /*group:*/0 ///
+  },
+  /* ====== after loading heap & plugins, show help about preferences
+     ===== */
+  {/*name:*/ "preferences-help", ///
+    /*key:*/ RPSPROGOPT_PREFERENCES_HELP, ///
+    /*arg:*/ nullptr, ///
+    /*flags:*/ 0, ///
+    /*doc:*/ "After loading heap and plugins, show help about ...\n"
+    "user preferences (given in the preferences file)\n"
+    , //
     /*group:*/0 ///
   },
   /* ====== publish some data to a remote URL and Web service which
@@ -333,7 +371,7 @@ struct argp_option rps_progoptions[] =
     /*doc:*/ "Set the name of this run to given RUN_NAME ...\n", //
     /*group:*/0 ///
   },
-  /* ======= naming the run ======= */
+  /* ======= showing some message ======= */
   {/*name:*/ "echo", ///
     /*key:*/ RPSPROGOPT_ECHO, ///
     /*arg:*/ "MESSAGE", ///
@@ -372,6 +410,25 @@ struct argp_option rps_progoptions[] =
     /*arg:*/ "PID_FILE", ///
     /*flags:*/ 0, ///
     /*doc:*/ "Write the pid of the running process into given PID_FILE.\n", //
+    /*group:*/0 ///
+  },
+  /* ======= user preferences ======= */
+  {/*name:*/ "user-pref", ///
+    /*key:*/ RPSPROGOPT_USER_PREFERENCES, ///
+    /*arg:*/ "USER_PREF", ///
+    /*flags:*/ 0, ///
+    /*doc:*/ "Set the user preferences to given file USER_PREF;\n"
+    "Lines starting with # are comments.\n"
+    "Lines before the first *REFPERSYS_USER_PREFERENCES are ignored.\n"
+    "\t So they could be some shell script....\n"
+    "See also --preferences-help option.\n"
+    "\n"
+    "The format is en.wikipedia.org/wiki/INI_file with named values...\n"
+    "The preferences file has sections starting with [secname]\n"
+    "Others are <name>=<value>, e.g. color='black' or height=345 ...\n"
+    "\nDefault preference file is"
+    " $HOME/" REFPERSYS_DEFAULT_PREFERENCE_PATH "\n"
+    , //
     /*group:*/0 ///
   },
   /* ======= version info ======= */
@@ -629,22 +686,61 @@ rps_run_loaded_application(int &argc, char **argv)
   ///// testing the REPL lexer
   if (!rps_test_repl_string.empty())
     {
-      rps_run_test_repl_lexer(rps_test_repl_string);
+      RPS_DEBUG_LOG(REPL, "running test repl string "
+                    << rps_test_repl_string);
+      try
+        {
+          rps_run_test_repl_lexer(rps_test_repl_string);
+          RPS_INFORMOUT("successfully done rps_run_test_repl_lexer on "
+                        << Rps_Cjson_String(rps_test_repl_string));
+        }
+      catch (std::exception& exc)
+        {
+          RPS_WARNOUT("rps_run_test_repl_lexer in rps_run_loaded_application failed on "
+                      << Rps_Cjson_String(rps_test_repl_string)
+                      << " with exception " << exc.what()
+                      << std::endl
+                      << RPS_FULL_BACKTRACE_HERE(1, "rps_run_loaded_application/testrepl"));
+          return;
+        };
     }
   /////
+#if RPS_USE_CURL
   /// publish using web techniques information about this process
+  /// see bugs.gentoo.org/939581,
   if (!rps_publisher_url_str.empty())
-    rps_publish_me(rps_publisher_url_str.c_str());
-
+    rps_curl_publish_me(rps_publisher_url_str.c_str());
+#endif /*RPS_USE_CURL*/
   ////  command vectors
   if (!rps_command_vec.empty())
     {
       RPS_INFORMOUT("before running " << rps_command_vec.size() << " command[s]");
-      rps_do_repl_commands_vec(rps_command_vec);
-      RPS_INFORMOUT("after running " << rps_command_vec.size() << " commands");
+      int nbcmd = (int)rps_command_vec.size();
+      try
+        {
+          rps_do_repl_commands_vec(rps_command_vec);
+          RPS_INFORMOUT("after running successfully "
+                        << nbcmd << " commands");
+        }
+      catch (std::exception& exc)
+        {
+          RPS_WARNOUT("rps_run_loaded_application got exception "
+                      << exc.what()
+                      << " when running " << nbcmd << " commands:"
+                      << Rps_Do_Output([&](std::ostream& out)
+          {
+            for (int cix=0; cix<nbcmd; cix++)
+              {
+                out << std::endl << rps_command_vec[cix];
+              }
+          })
+              << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rps_run_loaded_application/exc"));
+        };
     }
   if (access(rps_gui_script_executable, X_OK))
     RPS_WARNOUT("default GUI script " << rps_gui_script_executable << " is not executable");
+  ////
   ////
   ////
   if (!rps_get_fifo_prefix().empty())
@@ -712,7 +808,7 @@ rps_fill_cplusplus_temporary_code(Rps_CallFrame*callerframe, Rps_ObjectRef tempo
            " **                 for Emacs...\n" //
            " ** Local-Variables: ;;\n" //
            " ** compile-command: \"cd %s; %s %s /tmp/rpsplug_%s.so\" ;;",
-           rps_topdirectory, rps_plugin_builder_script, tempcppfilename, _f.tempob->oid().to_string().c_str());
+           rps_topdirectory, rps_plugin_builder, tempcppfilename, _f.tempob->oid().to_string().c_str());
   fprintf (tfil, //
            " ** End: ;;\n" //
            " ********/\n");
@@ -838,13 +934,13 @@ rps_edit_run_cplusplus_code (Rps_CallFrame*callerframe)
       needchdir = cwdpath != std::string{};
       //// our compilation command is...
       std::string buildplugincmd{rps_topdirectory};
-      buildplugincmd += "/build-plugin.sh ";
+      buildplugincmd += "/do-build-refpersys-plugin ";
       buildplugincmd += tempcppfilename;
-      buildplugincmd += " ";
+      buildplugincmd += " -o ";
       buildplugincmd += tempsofilename;
       RPS_WARNOUT("rps_edit_run_cplusplus_code incomplete for C++ code in "<< tempcppfilename
                   << " should compile into " << tempsofilename
-                  << " using either make plugin or build-plugin.sh"
+                  << " using either make plugin or do-build-refpersys-plugin"
                   << std::endl
                   << " - from "
                   << Rps_ShowCallFrame(&_)
@@ -1323,6 +1419,7 @@ rps_kill_wait_gui_process(void)
 /// registered to atexit....
 extern "C" void rps_exiting(void);
 
+
 void
 rps_exiting(void)
 {
@@ -1356,9 +1453,18 @@ rps_exiting(void)
 } // end rps_exiting
 
 
+static char*rps_stored_locale;
+
+const char*
+rps_locale(void)
+{
+  return rps_stored_locale;
+} // end rps_locale
+
 int
 main (int argc, char** argv)
 {
+  char*mylocale = nullptr;
   rps_progname = argv[0];
   bool helpwanted = false;
   bool versionwanted = false;
@@ -1366,8 +1472,36 @@ main (int argc, char** argv)
     helpwanted = true;
   if (argc>1 && !strcmp(argv[1], "--version"))
     versionwanted = true;
+  //// if --locale is given then process it quicky
+  for (int lix=1; lix<argc; lix++)
+    {
+      if (!strcmp(argv[lix], "--locale") && lix+1<argc)
+        mylocale = argv[lix+1];
+      else if (!strncmp(argv[lix], "--locale=", strlen("--locale=")))
+        mylocale = argv[lix]+strlen("--locale=");
+    }
+  if (mylocale)
+    {
+      char*l = setlocale(LC_ALL, mylocale);
+      if (!l)
+        RPS_FATALOUT("failed to set locale to " << mylocale);
+      rps_stored_locale = l;
+    }
+  else
+    rps_stored_locale = setlocale(LC_ALL, nullptr);
+  RPS_ASSERT(rps_stored_locale != nullptr);
   rps_stdout_istty = isatty(STDOUT_FILENO);
   static_assert(sizeof(rps_progexe) > 80);
+  ///// read /proc/version which hopefully is GNU/Linux specific
+  {
+    FILE* procversf = fopen("/proc/version", "r");
+    if (!procversf)
+      RPS_FATALOUT("failed to fopen /proc/version " << strerror(errno));
+    if (!fgets(rps_buffer_proc_version, rps_path_byte_size-2, procversf))
+      RPS_FATALOUT("failed to fgets /proc/version (fd#"
+                   << fileno(procversf) << ") " << strerror(errno));
+    fclose(procversf);
+  }
   {
     memset(rps_progexe, 0, sizeof(rps_progexe));
     ssize_t pxl = readlink("/proc/self/exe",
@@ -1400,7 +1534,18 @@ main (int argc, char** argv)
     };
   ///
   static char cwdbuf[rps_path_byte_size];
+  memset (cwdbuf, 0, sizeof(cwdbuf));
   char *mycwd = getcwd(cwdbuf, sizeof(cwdbuf)-2);
+  if (cwdbuf[sizeof(cwdbuf)-4] != 0)
+    {
+      /// In practice this won't happen. When it does, increase
+      /// rps_path_byte_size in refpersys.hh, currently it is more than
+      /// three hundred. The POSIX limit of 4Kbytes is unreasonable and
+      /// since we often allocate abolute file paths on the call stack
+      /// we avoid using _POSIX_PATH_MAX
+      RPS_FATALOUT("too long current working directory " << cwdbuf
+                   << " expecting less that " << (sizeof(cwdbuf)-4) << " bytes.");
+    }
   if (rps_stdout_istty)
     {
       std::cout << std::endl
@@ -1444,7 +1589,12 @@ main (int argc, char** argv)
   ////
   Rps_QuasiZone::initialize();
   rps_check_mtime_files();
+#if RPS_USE_CURL
   rps_initialize_curl();
+#endif /*RPS_USE_CURL*/
+//// initialize the gccjit
+  rps_gccjit_initialize ();
+  atexit(rps_gccjit_finalize);
   if (rps_my_load_dir.empty())
     {
       const char* rpld = realpath(rps_topdirectory, nullptr);
@@ -1480,9 +1630,12 @@ main (int argc, char** argv)
       if (rps_fltk_enabled())
         {
           RPS_DEBUG_LOG(REPL, "main before calling rps_fltk_run"
-                        << RPS_FULL_BACKTRACE_HERE(1, "main/fltk"));
+                        << std::endl
+                        << RPS_FULL_BACKTRACE_HERE(1, "main/fltk-run+"));
           rps_fltk_run();
-          RPS_DEBUG_LOG(REPL, "main after calling rps_fltk_run");
+          RPS_DEBUG_LOG(REPL, "main rps_fltk_run ended"
+                        << std::endl
+                        << RPS_FULL_BACKTRACE_HERE(1, "main/fltk-run-"));
         }
       else
         {
@@ -1535,9 +1688,6 @@ main (int argc, char** argv)
                 " nop; nop; nop; nop; nop; nop; nop; nop; nop");
   if (rps_debug_file)
     fflush(rps_debug_file);
-  /// Finalize GNU lightning for machine code generation; see
-  /// https://www.gnu.org/software/lightning/
-  finish_jit();
   fflush(nullptr);
   RPS_POSSIBLE_BREAKPOINT();
   RPS_INFORMOUT("end of RefPerSys process "
@@ -1549,7 +1699,10 @@ main (int argc, char** argv)
                 << "… built " << rps_timestamp
                 << " loaded state " << rps_my_load_dir << std::endl
                 << " elapsed " << rps_elapsed_real_time()
-                << ", cpu " << rps_process_cpu_time() << " seconds;" << std::endl
+                << ", cpu " << rps_process_cpu_time() << " seconds;"
+                << std::endl
+                << "… /proc/version " << rps_get_proc_version()
+                << std::endl
                 << "Final debug flags:"
                 << Rps_Do_Output([&](std::ostream& out)
   {

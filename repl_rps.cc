@@ -749,13 +749,13 @@ rps_repl_builtin_shell_command(Rps_CallFrame*callframe, Rps_ObjectRef obenvarg, 
                  Rps_ObjectRef obenv;
                 );
   _f.obenv = obenvarg;
-  RPS_INFORMOUT(std::endl << "running shell command " <<  Rps_QuotedC_String(intoksrc.curcptr()));
+  RPS_INFORMOUT(std::endl << "running shell command " <<  Rps_SingleQuotedC_String(intoksrc.curcptr()));
   fflush(nullptr);
   int ret = system(intoksrc.curcptr());
   if (ret == 0)
-    RPS_INFORMOUT("successful shell command " <<  Rps_QuotedC_String(intoksrc.curcptr()));
+    RPS_INFORMOUT("successful shell command " <<  Rps_SingleQuotedC_String(intoksrc.curcptr()));
   else
-    RPS_WARNOUT("failed shell command " << Rps_QuotedC_String(intoksrc.curcptr()) << " exited " << ret);
+    RPS_WARNOUT("failed shell command " << Rps_SingleQuotedC_String(intoksrc.curcptr()) << " exited " << ret);
 } // end rps_repl_builtin_shell_command
 
 void
@@ -1766,7 +1766,6 @@ rps_do_repl_commands_vec(const std::vector<std::string>&cmdvec)
   for (int cix=0; cix<nbcmd; cix++)
     {
       RPS_DEBUG_LOG(REPL, "REPL command [" << cix << "]: " << cmdvec[cix]);
-      int count=0;
       char bufpath[64];
       memset (bufpath, 0, sizeof(bufpath));
       snprintf(bufpath, sizeof(bufpath), "ReplCmd[%d]", cix);

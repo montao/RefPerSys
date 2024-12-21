@@ -12,6 +12,8 @@ than a few days or weeks of work.
 
 ## TODO List
 
+Improve both GNUmakefile and do-build-refpersys-plugin.cc to have secondary
+plugin C++ files
 
 ### context
 
@@ -20,8 +22,12 @@ For *RefPerSys* near commit [d53653c37f7a](https://github.com/RefPerSys/RefPerSy
 or at least contact [Basile
 Starynkevitch](http://starynkevitch.net/Basile/) by SMS, WhatsApp, or
 private email to
-[basile@starynkevitch.net](mailto:basile@starynkevitch.net) if you
+[basile@starynkevitch.net](mailto:basile@starynkevitch.net)
+and [b.starynkevitch@gmail.com](mailto:b.starynkevitch@gmail.com) if you
 want to contribute.
+
+(I Basile can also be reached during French office hours by Whatapp
+ to +33 6 8501 followed by the four digits product of 7 and 337)
 
 
 Please mention *RefPerSys* and the http://refpersys.org/ URL to colleagues, students, teachers et al...
@@ -31,13 +37,15 @@ Please mention *RefPerSys* and the http://refpersys.org/ URL to colleagues, stud
 Improve the REPL parsing so that `make test03` works
 
 
+Add a file `machlearn_rps.cc` including `mlpack.hpp` from https://www.mlpack.org/
+
 In commit c4935a77e45f3 (June 14, 2023) the `make test01`
 fails. Probably `Rps_ObjectZone::is_instance_of` and or
 `Rps_ObjectZone::is_subclass_of` are buggy. This is corrected in
 commit 889f895c0b (Jan 17, 2024)
 
 Improve *RefPerSys* so that its `--publish-me=http://localhost:8086/`
-program option works. See function `rps_publish_me` in file
+program option works. See function `rps_curl_publish_me` in file
 `curl_rps.cc`
 
 Review file `refpersys.hh` for spelling mistakes in comments.
@@ -66,9 +74,15 @@ both processes and file descriptors handled by that event loop. These
 file descriptors may be related to JSONRPC service, etc...
 
 
-Consider linking [GNU
-lightning](https://www.gnu.org/software/lightning) machine code
-generation library.
+
+Use [libgccjit](https://gcc.gnu.org/onlinedocs/jit/)
+
+
+### possible improvements
+
+Define some different plugins for the user interface. So remove
+all dependencies on X11, readline and replace them with other plugins (not
+the ones in plugins_dir) dealing with user interfacve.
 
 ## DONE  List
 

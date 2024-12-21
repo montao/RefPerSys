@@ -35,6 +35,14 @@
 
 #include "refpersys.hh"
 
+
+//@@PKGCONFIG glib-2.0
+#include "glib.h"
+
+
+/// explicitly include the generated/rpsdata.h
+#include "generated/rpsdata.h"
+
 #ifndef RPS_WITH_FLTK
 #error RefPerSys without FLTK
 #endif
@@ -43,8 +51,32 @@
 #error RefPerSys without FLTK toolkit
 #endif
 
+
+
+///NOTICE: after commit 094f904dd02 of end Nov. 2024 we use our userpref_rps.cc functions
+
+/// these are from generated/rpsdata.h
+#if RPS_FLTK_ABI_VERSION < 10400
+#error RefPerSys requires FLTK 1.4 or 1.5 ABI
+#endif
+
+#if RPS_FLTK_API_VERSION < 10400
+#error RefPerSys requires FLTK 1.4 or 1.5 API
+#endif
+
+
+#warning perhaps we should use FOX-toolkit from "https://fox-toolkit.org"
+
 #include <stdarg.h>
 #include <FL/Fl.H>
+
+// The below include defines FL_ABI_VERSION and FL_API_VERSION
+#include <FL/Enumerations.H>
+
+#if FL_API_VERSION < 10400
+#error FLTK 1.4 is required
+#endif
+
 #include <FL/platform.H>
 #include <FL/Fl_Window.H>
 #include <FL/Fl_Double_Window.H>
@@ -59,6 +91,8 @@
 #include <FL/Fl_Text_Display.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Pack.H>
+#include <FL/Fl_Input.H>
+/// Fl_Flex.h is only in FLTK 1.4 not FLTK 1.3
 #include <FL/Fl_Flex.H>
 
 /// conventional strings
@@ -71,9 +105,17 @@ const char rps_fltk_date[]= __DATE__;
 extern "C" const char rps_fltk_shortgitid[];
 const char rps_fltk_shortgitid[]= RPS_SHORTGITID;
 
+extern "C" const int rps_fltk_api_version;
+const int rps_fltk_api_version = FL_API_VERSION;
 
+
+// we don't use (after commit 4b2d027185 end of Nov. 2024) the FLTK
+// preference machinery, since we have userpref_rps.cc....
 ////////////////////////////////////////////////////////////////////////
 ////// ******** DECLARATIONS ********
+
+/// Fl_Color is an unsigned int (32 bits)
+extern "C" Fl_Color rps_fltk_color_of_name(const char*colorname);
 
 class Rps_PayloadFltkThing;
 class Rps_PayloadFltkWidget;
@@ -81,6 +123,7 @@ class Rps_PayloadFltkRefWidget;
 class Rps_PayloadFltkWindow;
 class Rps_FltkMainWindow;
 class Rps_FltkDebugWindow;
+class Rps_FltkInputTextEditor;
 
 extern "C" Rps_FltkMainWindow* rps_fltk_mainwin;
 Rps_FltkMainWindow* rps_fltk_mainwin;
@@ -92,10 +135,15 @@ extern "C" bool rps_fltk_is_initialized;
 
 bool rps_fltk_is_initialized;
 
+// Convert a string naming a color...
+// if the color is not found, return black; on success set *ok to true
+// accept numerical colors like #102030 for red=0x10 green=0x20 blue=0x30
+extern "C" Fl_Color rps_fltk_color_by_name (const char*name, bool*ok=nullptr);
 
 extern "C" void rps_fltk_input_fd_handler(FL_SOCKET fd, void *data);
 extern "C" void rps_fltk_output_fd_handler(FL_SOCKET fd, void *data);
 
+extern "C"
 /// temporary payload for any FLTK object
 class Rps_PayloadFltkThing : public Rps_Payload
 {
@@ -189,7 +237,8 @@ class Rps_PayloadFltkWidget : public Rps_PayloadFltkThing
 
 
 /// temporary payload for a reference to any FLTK widget
-class Rps_PayloadFltkRefWidget : public Rps_PayloadFltkThing, Fl_Callback_User_Data
+class Rps_PayloadFltkRefWidget :
+  public Rps_PayloadFltkThing
 {
   friend Rps_PayloadFltkRefWidget*
   Rps_QuasiZone::rps_allocate1<Rps_PayloadFltkRefWidget,Rps_ObjectZone*>(Rps_ObjectZone*);
@@ -239,7 +288,7 @@ Rps_PayloadFltkRefWidget::Rps_PayloadFltkRefWidget(Rps_ObjectZone*owner, Fl_Widg
   if (wid)
     {
       RPS_ASSERT(owner);
-      wid->user_data(this, /*auto_free=*/true);
+      wid->user_data(this);
     }
 } // end Rps_PayloadFltkRefWidget::Rps_PayloadFltkRefWidget
 
@@ -303,6 +352,9 @@ public:
   virtual ~Rps_FltkInputTextEditor();
 };              // end  Rps_FltkInputTextEditor
 
+
+
+////////////////
 class Rps_FltkOutputTextDisplay : public  Fl_Text_Display
 {
   /* inspired by FLTK 1.4 examples/texteditor-with-dynamic-colors.cxx */
@@ -314,16 +366,22 @@ public:
   virtual ~Rps_FltkOutputTextDisplay();
 };              // end  Rps_FltkOutputTextDisplay
 
+
+
+////////////////
 class Rps_FltkMainWindow: public Fl_Window
 {
   friend class Rps_FltkDebugWindow;
   Fl_Menu_Bar* _mainwin_menubar;
-  Fl_Flex* _mainwin_vflex;
   std::array<std::shared_ptr<Fl_Menu_Item>,
       (std::size_t)(2+(int)RPS_DEBUG__LAST)>
       _mainwin_dbgmenuarr;
   std::vector<std::string> _mainwin_stringvect;
   std::vector<char*> _mainwin_cstrvect;
+  Fl_Pack*_mainwin_vpack;
+  Rps_FltkInputTextEditor* _mainwin_inptextedit;
+  Rps_FltkOutputTextDisplay* _mainwin_outputdisp;
+  bool _mainwin_closing;
   void add_menu_item_for_debug_option(Rps_Debug dbg);
 protected:
   void fill_main_window(void);
@@ -331,6 +389,10 @@ protected:
   static void main_menu_cb(Fl_Widget*w, void*data);
   static void close_cb(Fl_Widget*w, void*data);
 public:
+  bool is_closing() const
+  {
+    return _mainwin_closing;
+  };
   Rps_FltkMainWindow(int x, int y, int w, int h, const char*title);
   Rps_FltkMainWindow(int w, int h, const char*title);
   const char* asprintf_mainwin(const char*fmt, ...)
@@ -338,6 +400,24 @@ public:
   virtual ~Rps_FltkMainWindow();
 };        // end Rps_FltkMainWindow;
 
+
+Rps_FltkOutputTextDisplay::Rps_FltkOutputTextDisplay(int x, int y, int w, int h)
+  : Fl_Text_Display(x,y,w,h)
+{
+  RPS_WARNOUT("unimplemented Rps_FltkOutputTextDisplay this@" << (void*)this
+              <<" x=" << x << ", y=" << y
+              << ", w=" << w << ", h=" << h << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "Rps_FltkOutputTextDisplay::Rps_FltkOutputTextDisplay"));
+#warning unimplemented Rps_FltkOutputTextDisplay::Rps_FltkOutputTextDisplay
+} // end Rps_FltkOutputTextDisplay::Rps_FltkOutputTextDisplay
+
+Rps_FltkOutputTextDisplay::~Rps_FltkOutputTextDisplay()
+{
+  RPS_WARNOUT("unimplemented ~Rps_FltkOutputTextDisplay this@" << (void*)this
+              << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "Rps_FltkOutputTextDisplay::Rps_FltkOutputTextDisplay"));
+#warning unimplemented Rps_FltkOutputTextDisplay::~Rps_FltkOutputTextDisplay
+} // end Rps_FltkOutputTextDisplay::~Rps_FltkOutputTextDisplay
 
 class Rps_FltkDebugWindow: public Fl_Window
 {
@@ -362,8 +442,25 @@ public:
 
 
 
+
+
+
 ////////////////////////////////////////////////////////////////
 //////// ******* IMPLEMENTATION *******
+Rps_FltkInputTextEditor::Rps_FltkInputTextEditor(int x, int y, int w, int h)
+  :  Fl_Text_Editor(x,y,w,h)
+{
+  RPS_DEBUG_LOG(REPL, "this @" << (void*)this << " x=" << x
+                << ",y=" << y << ",w=" << w << " h="<< h);
+}; // end Rps_FltkInputTextEditor::Rps_FltkInputTextEditor
+
+
+Rps_FltkInputTextEditor::~Rps_FltkInputTextEditor()
+{
+  RPS_DEBUG_LOG(REPL, "destr this @" << (void*)this);
+} // end Rps_FltkInputTextEditor destructor
+
+////////////////////////////////////////////////////////////////
 
 Rps_PayloadFltkWidget::Rps_PayloadFltkWidget(Rps_ObjectZone*owner, Fl_Widget*wid)
   : Rps_PayloadFltkWidget(Rps_ObjectRef(owner), wid) {};
@@ -381,6 +478,43 @@ rps_fltk_add_input_fd(int fd,
   Fl::add_fd(fd, POLLIN, rps_fltk_input_fd_handler, (void*)(intptr_t)ix);
 } // end rps_fltk_add_input_fd
 
+Fl_Color
+rps_fltk_color_by_name (const char*name, bool*ok)
+{
+  Fl_Color color= FL_BLACK;
+  if (!name)
+    goto failure;
+  if (name[0]=='#')
+    {
+      int red= -1, green= -1, blue= -1;
+      int pos= -1;
+      if (sscanf(name, "#%02x%02x%02x%n", &red, &green, &blue, &pos)>=3
+          && red>=0 && red<256 && green>=0 && green<256 && blue>=0
+          && blue<256 && pos>4)
+        {
+          color = fl_rgb_color(red,green,blue);
+          goto success;
+        }
+    }
+  else if (!isalpha(name[0]))
+    goto failure;
+#define RPS_RGB_COLOR(Red,Green,Blue,Name)      \
+  else if (!strcmp(name,Name))          \
+    { color = fl_rgb_color(Red,Green,Blue); goto success; }
+#include "generated/rps-rgb-colors.hh"
+#undef RPS_RGB_COLOR
+#undef RPS_NB_RGB_COLORS
+#undef RPS_WIDEST_RGB_COLOR
+  goto failure;
+success:
+  if (ok)
+    *ok = true;
+  return color;
+failure:
+  if (ok)
+    *ok = false;
+  return FL_BLACK;
+} // end rps_fltk_color_by_name
 
 void
 rps_fltk_add_output_fd(int fd,
@@ -536,12 +670,21 @@ Rps_PayloadFltkThing::dump_json_content(Rps_Dumper*du, Json::Value&jv) const
 
 Rps_FltkMainWindow::Rps_FltkMainWindow(int x, int y, int w, int h, const char*title)
   : Fl_Window(x,y,w,h,title),
-    _mainwin_menubar(nullptr), _mainwin_vflex(nullptr), _mainwin_dbgmenuarr(), _mainwin_stringvect(), _mainwin_cstrvect()
+    _mainwin_menubar(nullptr),
+    _mainwin_dbgmenuarr(), _mainwin_stringvect(), _mainwin_cstrvect(),
+    _mainwin_vpack(nullptr),
+    _mainwin_inptextedit(nullptr),
+    _mainwin_outputdisp(nullptr),
+    _mainwin_closing(false)
 {
   constexpr int estimatenbstring = 20;
   _mainwin_stringvect.reserve(estimatenbstring);
   constexpr int estimatenbcstr = 32;
   _mainwin_cstrvect.reserve(estimatenbcstr);
+  RPS_INFORMOUT("Rps_FltkMainWindow x=" << x << ",y=" << y
+                << ",w=" << w << ",h=" << h
+                << ",title=" << Rps_Cjson_String(title)
+                << " @" << (void*)this);
   RPS_DEBUG_LOG(REPL, "Rps_FltkMainWindow x=" << x << ",y=" << y
                 << ",w=" << w << ",h=" << h
                 << ",title=" << Rps_Cjson_String(title)
@@ -615,7 +758,9 @@ Rps_FltkMainWindow::add_menu_item_for_debug_option(Rps_Debug dbglev)
   Fl_Menu_Item*mitem = const_cast<Fl_Menu_Item*>(_mainwin_menubar->menu()+rk);
   RPS_ASSERT(mitem != nullptr);
   if (rps_debug_flags & (1 << unsigned(dbglev)))
-    mitem->value(1);
+    mitem->set();
+  else
+    mitem->clear();
   RPS_POSSIBLE_BREAKPOINT();
 } // end Rps_FltkMainWindow::add_menu_item_for_debug_option
 
@@ -627,9 +772,29 @@ Rps_FltkMainWindow::fill_main_window(void)
                 << RPS_FULL_BACKTRACE_HERE(1, "Rps_FltkMainWindow/fill_main_window"));
   this->begin();
   //////////// the menubar
+  int menubar_w = w();
+  int menubar_h = 25;
   {
-    _mainwin_menubar = new Fl_Menu_Bar(0, 0, w(), 25);
-    RPS_DEBUG_LOG(REPL, "Rps_FltkMainWindow::fill_main_window _mainwin_menubar@" << (void*)_mainwin_menubar);
+
+    const char*mainmenucolor = rps_get_extra_arg("fltk_main_menu_color");
+    _mainwin_menubar = new Fl_Menu_Bar(0, 0, menubar_w, menubar_h);
+
+    RPS_DEBUG_LOG(REPL, "Rps_FltkMainWindow::fill_main_window _mainwin_menubar@" << (void*)_mainwin_menubar
+                  << " mainmenucolor=" << Rps_Cjson_String(mainmenucolor)
+                  << " w=" << w() << " h=" << h()
+                  << " menubar_w=" << menubar_w
+                  << " menubar_h=" << menubar_h);
+    if (mainmenucolor)
+      {
+        bool ok=false;
+        Fl_Color col = rps_fltk_color_by_name(mainmenucolor, &ok);
+        if (ok && col != FL_BLACK)
+          {
+            RPS_DEBUG_LOG(REPL, "mainwinmenucolor:" << mainmenucolor
+                          << "=" << (long)col);
+            _mainwin_menubar->color(col);
+          }
+      }
     _mainwin_menubar->add("&App/e&Xit", "^x", main_menu_cb, (void*)"X");
     _mainwin_menubar->add("&App/&Quit", "^q", main_menu_cb, (void*)"Q");
     _mainwin_menubar->add("&App/&Dump", "^d", main_menu_cb, (void*)"D");
@@ -642,7 +807,10 @@ Rps_FltkMainWindow::fill_main_window(void)
 #undef Rps_FLTK_debug_option
   };
   /////////////
-  _mainwin_vflex = new Fl_Flex(0, 25, w(), h()-26);
+  _mainwin_vpack = new Fl_Pack(/*x:*/0, /*y:*/menubar_h+1,
+                                     /*w:*/w(), /*h:*/h()-(menubar_h+1));
+  _mainwin_vpack->begin();
+  int label_h = 13;
   {
     Fl_Widget*firstlabel = nullptr;
     char*labelstr=nullptr;
@@ -654,16 +822,57 @@ Rps_FltkMainWindow::fill_main_window(void)
     RPS_POSSIBLE_BREAKPOINT();
     labelstr = strdup(labelbuf);
     RPS_DEBUG_LOG(REPL, "fill_main_window labelstr:" << labelstr);
-    _mainwin_vflex->spacing(2);
-    _mainwin_vflex->begin();
-    firstlabel = new Fl_Box(0,0,0,0,labelstr);
-    _mainwin_vflex->end();
-    _mainwin_vflex->layout();
+    firstlabel = new Fl_Box(/*x:*/0,/*y:*/menubar_h,
+                                  /*w:*/w(),/*h:*/label_h,
+                                  labelstr);
+    const char*labelcolor = rps_get_extra_arg("fltk_label_color");
+    if (labelcolor)
+      {
+        bool ok=false;
+        Fl_Color col = rps_fltk_color_by_name(labelcolor, &ok);
+        if (ok && col != FL_BLACK)
+          {
+            RPS_DEBUG_LOG(REPL, "fill_main_window labelcolor=" << labelcolor
+                          << "=" << col);
+            firstlabel->color(col);
+          }
+      }
+    firstlabel->show();
   }
+  int texteditheight = h()/2-(menubar_h+label_h+1);
+  int textedity = menubar_h+label_h+1;
+  const char*inputcolor = rps_get_extra_arg("fltk_input_color");
+  _mainwin_inptextedit
+    = new Rps_FltkInputTextEditor(/*x:*/0,/*y:*/textedity,
+                                        /*w:*/w(), /*h:*/texteditheight);
+  if (inputcolor)
+    {
+      bool ok=false;
+      Fl_Color col = rps_fltk_color_by_name(inputcolor, &ok);
+      if (ok && col != FL_BLACK)
+        {
+          RPS_DEBUG_LOG(REPL, "fill_main_window inputcolor=" << inputcolor
+                        << "=" << col);
+          _mainwin_inptextedit->color(col);
+        }
+
+    }
+#warning _mainwin_inptextedit should have a different background color
+  _mainwin_vpack->add(_mainwin_inptextedit);
+  _mainwin_outputdisp =
+    new Rps_FltkOutputTextDisplay(/*x:*/0, textedity+texteditheight+1,
+                                        /*w:*/w(), /*h:*/h()-( textedity+texteditheight+1));
+  _mainwin_vpack->add(_mainwin_outputdisp);
+  _mainwin_vpack->end();
+  _mainwin_inptextedit->show();
+  _mainwin_vpack->show();
   this->end();
   callback(close_cb, nullptr);
   RPS_POSSIBLE_BREAKPOINT();
-  RPS_DEBUG_LOG(REPL, "Rps_FltkMainWindow::fill_main_window done w=" << w() << ",h=" << h());
+  RPS_DEBUG_LOG(REPL, "Rps_FltkMainWindow::fill_main_window done w="
+                << w() << ",h=" << h()
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "Rps_FltkMainWindow::fill_main_window-"));
 } // end Rps_FltkMainWindow::fill_main_window
 
 Rps_FltkMainWindow::~Rps_FltkMainWindow()
@@ -727,7 +936,10 @@ Rps_FltkMainWindow::main_menu_cb(Fl_Widget*w, void*data)
   else if (!strcmp((const char*)data, "d-")) // debug stop
     {
 #warning unimplemented debug stop
-      RPS_WARNOUT("unimplemented debug stop rps_fltk_debugwin@" << (void*)rps_fltk_debugwin);
+      RPS_WARNOUT("unimplemented debug stop rps_fltk_debugwin@"
+                  << (void*)rps_fltk_debugwin
+                  << std::endl
+                  << RPS_FULL_BACKTRACE_HERE(1, "main_menu_cb debug stop"));
     }
   else if (!strcmp((const char*)data, "d+")) // debug show
     {
@@ -737,7 +949,9 @@ Rps_FltkMainWindow::main_menu_cb(Fl_Widget*w, void*data)
       if (!rps_fltk_debugwin)
         rps_fltk_debugwin = new Rps_FltkDebugWindow(670,480);
       rps_fltk_debugwin->show();
-      RPS_WARNOUT("unimplemented debug show rps_fltk_debugwin@" << (void*)rps_fltk_debugwin);
+      RPS_WARNOUT("unimplemented debug show rps_fltk_debugwin@" << (void*)rps_fltk_debugwin
+                  << std::endl
+                  << RPS_FULL_BACKTRACE_HERE(1, "main_menu_cb debug show"));
     }
   else if (!strcmp((const char*)data, "d_")) // debug clear
     {
@@ -782,7 +996,7 @@ Rps_FltkMainWindow::close_cb(Fl_Widget*wid, void*data)
       if (system(pmapcmd))
         RPS_FATALOUT("failed to run " << pmapcmd);
     };
-
+  rps_fltk_mainwin->_mainwin_closing = true;
   rps_do_stop_event_loop();
 } // end Rps_FltkMainWindow::close_cb
 #warning incomplete implementation of class Rps_FltkMainWindow
@@ -879,31 +1093,36 @@ Rps_FltkDebugWindow::~Rps_FltkDebugWindow()
   rps_fltk_debugwin = nullptr;
 } // end Rps_FltkDebugWindow destructor
 ////////////////
+#undef rps_fltk_get_abi_version
 int
-rps_fltk_abi_version (void)
+rps_fltk_get_abi_version (void)
 {
   return Fl::abi_version();
-} // end rps_fltk_abi_version
+} // end rps_fltk_get_abi_version
 
+#undef rps_fltk_get_api_version
 int
-rps_fltk_api_version (void)
+rps_fltk_get_api_version (void)
 {
   return Fl::api_version ();
-} // end rps_fltk_api_version
+} // end rps_fltk_get_api_version
 
+/// this function is called once, by rps_parse1opt in utilities_rps.cc
 void
 rps_fltk_progoption(char*arg, struct argp_state*state, bool side_effect)
 {
-  RPS_DEBUG_LOG(PROGARG, "rps_fltk_progoption arg:" << arg
-                << " next:"
+  RPS_DEBUG_LOG(PROGARG, "rps_fltk_progoption arg:'"
+                <<  Rps_Cjson_String (arg)
+                << "' next:"
                 << (side_effect?state->next:-1)
                 << " arg_num:"
                 << (side_effect?state->arg_num:-1)
                 << std::endl
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_progoption"));
   /// testfltk2 make target uses REPL debugging
-  RPS_DEBUG_LOG(REPL, "rps_fltk_progoption arg:" << arg
-                << " next:"
+  RPS_DEBUG_LOG(REPL, "rps_fltk_progoption arg:'"
+                <<  Rps_Cjson_String (arg)
+                << "' next:"
                 << (side_effect?state->next:-1)
                 << " arg_num:"
                 << (side_effect?state->arg_num:-1)
@@ -915,10 +1134,14 @@ rps_fltk_progoption(char*arg, struct argp_state*state, bool side_effect)
       int nw = Fl::arg(state->argc, state->argv, state->next);
       RPS_DEBUG_LOG(PROGARG, "rps_fltk_progoption nw:" << nw
                     <<  " next#" << state->next
-                    <<  " argnum#" << state->arg_num);
+                    << " arg:'"
+                    <<  Rps_Cjson_String (arg)
+                    <<  "' argnum#" << state->arg_num);
       RPS_DEBUG_LOG(REPL, "rps_fltk_progoption nw:" << nw
                     <<  " next#" << state->next
-                    <<  " argnum#" << state->arg_num
+                    << " arg:'"
+                    <<  Rps_Cjson_String (arg)
+                    <<  "' argnum#" << state->arg_num
                     << " state.progargs::"
                     << RPS_OUT_PROGARGS(state->argc, state->argv)
                     << " state.argnum:" << state->arg_num << " state.next:"
@@ -928,7 +1151,10 @@ rps_fltk_progoption(char*arg, struct argp_state*state, bool side_effect)
 #warning missing code in rps_fltk_progoption
   if (arg)
     {
-      RPS_WARNOUT("unimplemented rps_fltk_progoption arg=" <<  Rps_Cjson_String(arg)
+      //// obsolete code
+      //-*      rps_fltk_prefpath = arg;
+      RPS_WARNOUT("unimplemented rps_fltk_progoption arg='"
+                  <<  Rps_Cjson_String(arg)
                   << "' side_effect=" << (side_effect?"True":"False")
                   << " thread:" << rps_current_pthread_name() << std::endl
                   << " state.progargs::"
@@ -968,16 +1194,89 @@ rps_fltk_flush (void)
 void
 rps_fltk_initialize (int argc, char**argv)
 {
-#warning missing code in rps_fltk_initialize to create FLTK windows
   char titlebuf[128];
   memset (titlebuf, 0, sizeof(titlebuf));
-  snprintf(titlebuf, sizeof(titlebuf), "RefPerSys %.9s v%d.%d pid %d on %s",
-           rps_shortgitid,
-           rps_get_major_version(), rps_get_minor_version(), (int)getpid(),
-           rps_hostname());
+  RPS_DEBUG_LOG(REPL, "rps_fltk_initialize start thread="
+                << rps_current_pthread_name()
+                << " pid#" << (int)getpid()
+                << " argc=" << argc
+                << " argv=" << RPS_OUT_PROGARGS(argc, argv)
+                //// obsolete code
+                //-* << " rps_fltk_prefpath=" << Rps_Cjson_String(rps_fltk_prefpath)
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_initialize start"));
+  RPS_POSSIBLE_BREAKPOINT();
+  RPS_ASSERT(argc>0 && argv[0] != nullptr);
+  ////
+  //// obsolete code
+  //-*  if (rps_fltk_prefpath)
+  //-*    {
+  //-*      RPS_DEBUG_LOG(REPL, "rps_fltk_initialize rps_fltk_prefpath="
+  //-*        << rps_fltk_prefpath);
+  //-*      RPS_POSSIBLE_BREAKPOINT();
+  //-*      rps_fltk_preferences = //
+  //-*        new Fl_Preferences(rps_fltk_prefpath,
+  //-*                           "refpersys.org",
+  //-*                           "RefPerSys");
+  //-*      RPS_INFORMOUT("using explicit FLTK preferences from "
+  //-*                    << rps_fltk_prefpath
+  //-*                    << " on " << rps_fltk_preferences->path());
+  //-*    }
+  //-*  else
+  //-*    {
+  //-*      rps_fltk_preferences = //
+  //-*        new Fl_Preferences(Fl_Preferences::USER,
+  //-*                           "refpersys.org",
+  //-*                           "refpersys");
+  //-*      RPS_INFORMOUT("using user FLTK preferences on "
+  //-*                    << rps_fltk_preferences->path());
+  //-*    };
+  ////
+  if (!rps_run_name.empty())
+    snprintf(titlebuf, sizeof(titlebuf),
+             "RefPerSys/%.20s %.9s v%d.%d pid %d on %s",
+             rps_run_name.c_str(),
+             rps_shortgitid,
+             rps_get_major_version(), rps_get_minor_version(),
+             (int)getpid(),
+             rps_hostname());
+  else
+    snprintf(titlebuf, sizeof(titlebuf),
+             "RefPerSys %.9s v%d.%d pid %d on %s",
+             rps_shortgitid,
+             rps_get_major_version(), rps_get_minor_version(),
+             (int)getpid(),
+             rps_hostname());
+
   fl_open_display();
-  rps_fltk_mainwin = new Rps_FltkMainWindow(/*width=*/750, /*height=*/550,
-      titlebuf);
+  //-* RPS_ASSERT (rps_fltk_preferences != nullptr);
+  /// FIXME: should use preferences
+#warning rps_fltk_initialize should use our user preferences functions in userpref_rps.cc
+  int mainwin_w = -1;
+  int mainwin_h = -1;
+  {
+    //-* Fl_Preferences mainwinpref(rps_fltk_preferences, "MainWindow");
+    //-* bool goth = (bool)mainwinpref.get("height", mainwin_h, 777);
+    //-* bool gotw = (bool)mainwinpref.get("width", mainwin_w, 555);
+    bool goth = rps_userpref_has_value("fltk","mainwin_height");
+    bool gotw = rps_userpref_has_value("fltk","mainwin_width");
+    if (goth)
+      mainwin_h = (int) rps_userpref_get_long("fltk","mainwin_height", 777);
+    else
+      mainwin_h = 750;
+    if (gotw)
+      mainwin_w = (int) rps_userpref_get_long("fltk","mainwin_height", 555);
+    else
+      mainwin_w = 500;
+    RPS_DEBUG_LOG(REPL, "for mainwin "
+                  << (goth?"got":"default") << " h=" << mainwin_h
+                  << " & "
+                  << (gotw?"got":"default") << " w=" << mainwin_w
+                 );
+  }
+  rps_fltk_mainwin =
+    new Rps_FltkMainWindow(/*width=*/mainwin_w, /*height=*/mainwin_h,
+                                     titlebuf);
   rps_fltk_mainwin->show(argc, argv);
   rps_fltk_flush ();
   RPS_DEBUG_LOG(REPL, "rps_fltk_initialize showing mainwin@"
@@ -992,6 +1291,74 @@ rps_fltk_initialize (int argc, char**argv)
               << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_initialize"));
 } // end rps_fltk_initialize
 
+
+Fl_Color /// some internal unsigned 32 bits int
+rps_fltk_color_of_name(const char*colorname)
+{
+  RPS_ASSERT(rps_fltk_is_initialized);
+  if (!colorname)
+    {
+      RPS_WARNOUT("no colorname to rps_fltk_color_of_name"
+                  << std::endl
+                  << RPS_FULL_BACKTRACE_HERE(1,
+                                             "rps_fltk_color_of_name/nil"));
+      return FL_BACKGROUND_COLOR;
+    }
+#define RPS_TEST_COLOR(Name,Flcol) else if (!strcmp(colorname, #Name)) \
+    return Flcol
+  RPS_TEST_COLOR("white",fl_rgb_color(255,255,255));
+  RPS_TEST_COLOR("black",fl_rgb_color(0,0,0));
+  RPS_TEST_COLOR("red",fl_rgb_color(255,0,0));
+  RPS_TEST_COLOR("green",fl_rgb_color(0,255,0));
+  RPS_TEST_COLOR("blue",fl_rgb_color(0,0,255));
+  /*TODO: improve GNUmakefile to generate some included file here from
+    /etc/X11/rgb.txt file*/
+#undef RPS_TEST_COLOR
+  else
+    {
+      RPS_WARNOUT("bad colorname '" << Rps_Cjson_String(colorname)
+                  << "' to rps_fltk_color_of_name"
+                  << std::endl
+                  << RPS_FULL_BACKTRACE_HERE(1,
+                                             "rps_fltk_color_of_name/nil"));
+      return FL_BACKGROUND_COLOR;
+    }
+} // end rps_fltk_color_of_name
+
+extern "C" bool rps_fltk_program_is_quitting(void);
+bool
+rps_fltk_program_is_quitting(void)
+{
+#if FLTK_API_VERSION >= 10400
+  ///FLTK 1.4
+  RPS_DEBUG_LOG(REPL, "rps_fltk_program_is_quitting program_should_quit="
+                << (Fl::program_should_quit())?"True":"false"
+                << std::endl
+                << " thread:" << rps_current_pthread_name()
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_program_is_quitting"));
+  return Fl::program_should_quit();
+#else
+  if (!rps_fltk_mainwin)
+    {
+      RPS_DEBUG_LOG(REPL, "rps_fltk_program_is_quitting no mainwin"
+                    << std::endl
+                    << " thread:" << rps_current_pthread_name()
+                    << std::endl
+                    << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_program_is_quitting"));
+      return true;
+    }
+  RPS_DEBUG_LOG(REPL, "rps_fltk_program_is_quitting mainwin "
+                << ((rps_fltk_mainwin->is_closing())?"closing":"not-closing")
+                << std::endl
+                << " thread:" << rps_current_pthread_name()
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_program_is_quitting"));
+  return rps_fltk_mainwin->is_closing();
+#endif  // FLTK 1.3
+} // end rps_fltk_program_is_quitting
+
+
 void
 rps_fltk_stop(void)
 {
@@ -999,7 +1366,14 @@ rps_fltk_stop(void)
                 << std::endl
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_stop"));
   Fl::lock();
+#if FLTK_API_VERSION >= 10400 // FLTK 1.4
+  /// in FLTK1.4 only Fl::program_should_quit(1);
   Fl::program_should_quit(1);
+#else // FLTKI 1.3
+  RPS_WARNOUT("rps_fltk_stop called from " << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_stop")
+              << std::endl << " should quit FLTK event loop");
+#endif
   Fl::unlock();
   RPS_DEBUG_LOG(REPL, "rps_fltk_stop done from thread:" << rps_current_pthread_name());
 } // end rps_fltk_stop
@@ -1021,8 +1395,14 @@ rps_fltk_run (void)
       double waitdelay = rps_run_delay/16.0+0.02;
       if (waitdelay < minimal_wait_delay)
         waitdelay = minimal_wait_delay;
+      if (RPS_DEBUG_ENABLED(GUI) || RPS_DEBUG_ENABLED(REPL)
+          || RPS_DEBUG_ENABLED(EVENT_LOOP))
+        {
+          waitdelay += 2.5;
+          RPS_INFORMOUT("rps_fltk_run increased waitdelay to " << waitdelay);
+        };
       RPS_DEBUG_LOG(REPL, "rps_fltk_run thread:" << rps_current_pthread_name() << " waitdelay=" << waitdelay);
-      while (!Fl::program_should_quit())
+      while (!rps_fltk_program_is_quitting())
         {
           loopcnt++;
           RPS_DEBUG_LOG(REPL, "rps_fltk_run thread:" << rps_current_pthread_name()
@@ -1035,14 +1415,18 @@ rps_fltk_run (void)
               RPS_DEBUG_LOG(REPL, "rps_fltk_run thread:" << rps_current_pthread_name()
                             << " loopcnt#" << loopcnt
                             << " quit after "
-                            << rps_run_delay << " elapsed sec.");
-              Fl::program_should_quit(1);
+                            << rps_run_delay << " elapsed sec."
+                            << std::endl
+                            << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_run/stop"));
+              // TODO: code review for FLTK1.3
+              rps_fltk_stop();
+              break;
             }
         };
     }
   else   // no rps_run_delay
     {
-      while (!Fl::program_should_quit())
+      while (!rps_fltk_program_is_quitting())
         {
           loopcnt++;
           RPS_DEBUG_LOG(REPL, "rps_fltk_run thread:" << rps_current_pthread_name()
@@ -1131,6 +1515,12 @@ rps_fltk_show_debug_message(const char*file, int line, const char*funcname,
   RPS_ASSERT((int)dbgopt != 0);
   RPS_ASSERT(dbgcount>0);
   RPS_ASSERT(msg != nullptr);
+  RPS_WARNOUT("incomplete rps_fltk_show_debug_message "
+              << file << ":" << line << ":" << funcname << "::"
+              << std::endl
+              << msg
+              << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rps_fltk_show_debug_message"));
 #warning incomplete rps_fltk_show_debug_message
 } // end rps_fltk_show_debug_message
 

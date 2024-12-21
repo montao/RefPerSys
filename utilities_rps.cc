@@ -32,7 +32,13 @@
  ******************************************************************************/
 
 #include "refpersys.hh"
-#include <lightning.h>
+
+// comment for our do-scan-refpersys-pkgconfig.c utility
+//@@PKGCONFIG gmp
+//@@PKGCONFIG gmpxx
+//@@PKGCONFIG glib-2.0
+//@@PKGCONFIG cairo
+
 
 #if RPS_WITH_FLTK
 #include <FL/Fl.H>
@@ -41,17 +47,17 @@
 #include <FL/Fl_Menu_Bar.H>
 #include <FL/Fl_Multi_Label.H>
 #include <FL/Fl_Widget.H>
+#if FLTK_API_VERSION >= 10400
 #include <FL/Fl_Pack.H>
 #include <FL/Fl_Flex.H>
+#endif
 #include <FL/Fl_Text_Buffer.H>
 #include <FL/Fl_Text_Editor.H>
 #include <FL/Fl_Box.H>
 #endif // RPS_WITH_FLTK
 
-// comment for our do-scan-pkgconfig.c utility
-//@@PKGCONFIG gmp
-//@@PKGCONFIG gmpxx
-//@@PKGCONFIG lightning
+#include "glib.h"
+#include "libgccjit++.h"
 
 extern "C" const char rps_utilities_gitid[];
 const char rps_utilities_gitid[]= RPS_GITID;
@@ -62,9 +68,11 @@ const char rps_utilities_date[]= __DATE__;
 extern "C" const char rps_utilities_shortgitid[];
 const char rps_utilities_shortgitid[]= RPS_SHORTGITID;
 
+extern "C" void rps_set_user_preferences(const char*path);
 
 extern "C" char*rps_chdir_path_after_load;
 
+static bool rps_flag_pref_help;
 
 std::string rps_run_name;
 
@@ -113,6 +121,12 @@ rps_is_main_thread(void)
   return pthread_self() == rps_main_thread_handle;
 } // end rps_is_main_thread
 
+
+bool
+rps_want_user_preferences_help(void)
+{
+  return rps_flag_pref_help;
+} // end rps_want_user_preferences_help
 
 static std::map<std::string,std::string> rps_dict_extra_arg;
 
@@ -267,7 +281,7 @@ rps_get_extra_arg(const char*name)
   bool is_good_name=isalpha(name[0]);
   for (const char*pc = name; is_good_name && *pc; pc++)
     is_good_name = isalnum(*pc) || *pc == '_';
-  if (!is_good_name)
+  if (RPS_UNLIKELY(!is_good_name))
     return nullptr;
   std::string goodstr{name};
   auto it = rps_dict_extra_arg.find(goodstr);
@@ -442,22 +456,22 @@ rps_print_types_info(void)
         (int)sizeof(Ty), (int)alignof(Ty))
   /////
 #define EXPLAIN_TYPE2(Ty1,Ty2) printf(TYPEFMT_rps " %5d %5d\n", \
-              #Ty1 "," #Ty2,          \
-              (int)sizeof(Ty1,Ty2),       \
+              #Ty1 "," #Ty2,                                    \
+              (int)sizeof(Ty1,Ty2),                             \
               (int)alignof(Ty1,Ty2))
   /////
 #define EXPLAIN_TYPE3(Ty1,Ty2,Ty3)              \
   printf(TYPEFMT_rps " %5d %5d\n",              \
-   #Ty1 "," #Ty2 ",\n"        \
-   "                     "#Ty3,     \
-   (int)sizeof(Ty1,Ty2,Ty3),      \
+   #Ty1 "," #Ty2 ",\n"                          \
+   "                     "#Ty3,                 \
+   (int)sizeof(Ty1,Ty2,Ty3),                    \
    (int)alignof(Ty1,Ty2,Ty3))
   /////
-#define EXPLAIN_TYPE4(Ty1,Ty2,Ty3,Ty4)    \
-  printf(TYPEFMT_rps " %5d %5d\n",    \
-   #Ty1 "," #Ty2 ",\n                " #Ty3 \
-   "," #Ty4,          \
-   (int)sizeof(Ty1,Ty2,Ty3,Ty4),    \
+#define EXPLAIN_TYPE4(Ty1,Ty2,Ty3,Ty4)          \
+  printf(TYPEFMT_rps " %5d %5d\n",              \
+   #Ty1 "," #Ty2 ",\n                " #Ty3     \
+   "," #Ty4,                                    \
+   (int)sizeof(Ty1,Ty2,Ty3,Ty4),                \
    (int)alignof(Ty1,Ty2,Ty3,Ty4))
   /////
   EXPLAIN_TYPE(int);
@@ -517,9 +531,11 @@ rps_print_types_info(void)
 #if RPS_WITH_FLTK
   printf("\n\n===== FLTK widgets from %s:%d ====\n", __FILE__, __LINE__);
   EXPLAIN_TYPE(Fl_Box);
+#if FLTK_API_VERSION >= 10400
   EXPLAIN_TYPE(Fl_Flex);
-  EXPLAIN_TYPE(Fl_Menu_Bar);
   EXPLAIN_TYPE(Fl_Pack);
+#endif
+  EXPLAIN_TYPE(Fl_Menu_Bar);
   EXPLAIN_TYPE(Fl_Text_Buffer);
   EXPLAIN_TYPE(Fl_Text_Editor);
   EXPLAIN_TYPE(Fl_Widget);
@@ -618,8 +634,14 @@ rps_show_version(void)
   memset (exepath, 0, sizeof(exepath));
   static char realexepath[PATH_MAX];
   memset (realexepath, 0, sizeof(realexepath));
-  readlink("/proc/self/exe", exepath, sizeof(exepath));
-  (void) realpath(exepath, realexepath);
+  {
+    ssize_t sz = readlink("/proc/self/exe", exepath, sizeof(exepath));
+    RPS_ASSERT(sz>0 && exepath[0]);
+  }
+  {
+    char*rp= realpath(exepath, realexepath);
+    RPS_ASSERT(rp != nullptr);
+  }
   std::cout << "RefPerSys "<< rps_get_major_version() << "."
             << rps_get_minor_version() //
             << ", an open source Artificial Intelligence system" << std::endl;
@@ -638,13 +660,20 @@ rps_show_version(void)
             << " md5sum of " << nbfiles << " source files: " << rps_md5sum << std::endl
             << " with " << nbsubdirs << " subdirectories." << std::endl
             << " GNU glibc: " << gnu_get_libc_version() << std::endl
+            << " Glib: " << glib_major_version
+            << "." << glib_minor_version
+            << "." << glib_micro_version << std::endl
             << " executable: " << exepath;
   if (strcmp(exepath, realexepath))
     std::cout <<  " really " << realexepath;
-  std::cout << " FLTK (see fltk.org) ABI version:" << rps_fltk_abi_version()
+#if RPS_WITH_FLTK
+  std::cout << " FLTK (see fltk.org) ABI version:" << rps_fltk_get_abi_version()
             << std::endl;
-  std::cout << " FLTK API version:" << rps_fltk_api_version()
+  std::cout << " FLTK API version:" << rps_fltk_get_api_version()
             << std::endl;
+#endif
+  std::cout << " GCCJIT version:" << gcc_jit_version_major()
+            << "." << gcc_jit_version_minor() << "." << gcc_jit_version_patchlevel() << std::endl;
   std::cout << std::endl
             /* TODO: near commit 191d55e1b31c, march 2023; decide
                which parser generator to really use... and drop the
@@ -654,13 +683,21 @@ rps_show_version(void)
             << std::endl
             << " default GUI script: " << rps_gui_script_executable << std::endl
             << " Read Eval Print Loop: " << rps_repl_version() << std::endl
+#if RPS_USE_CURL
             << " libCURL for web client: " << rps_curl_version() << std::endl
-            << " JSONCPP: " << JSONCPP_VERSION_STRING << std::endl
+#endif /*RPS_USE_CURL*/
+            ;
+  ////
+  RPS_POSSIBLE_BREAKPOINT();
+  ////
+  std::cout << " JSONCPP: " << JSONCPP_VERSION_STRING << std::endl
             << " GPP preprocessor command: " << rps_gpp_preprocessor_command << std::endl
             << " GPP preprocessor path: " << rps_gpp_preprocessor_realpath << std::endl
             << " GPP preprocessor version: " << rps_gpp_preprocessor_version << std::endl
             << " made with: " << rps_gnumakefile << std::endl
             << " running on: " << rps_hostname() << std::endl
+            << " /proc/version:" << std::endl
+            << " " << rps_get_proc_version() << std::endl
             << "This executable was built by "
             << rps_building_user_name
             << " of email " << rps_building_user_email << std::endl
@@ -678,7 +715,9 @@ rps_show_version(void)
   std::cout << std::endl << " C++ compiler: " << rps_cxx_compiler_version << std::endl
             << " free software license: GPLv3+, see https://gnu.org/licenses/gpl.html" << std::endl
             << "+++++ there is no WARRANTY, to the extent permitted by law ++++" << std::endl
-            << "***** see also refpersys.org *****"
+            << "***** see also refpersys.org *****" << std::endl
+            << "and github.com/RefPerSys/RefPerSys commit "
+            << rps_shortgitid
             << std::endl << std::endl;
 } // end rps_show_version
 
@@ -726,8 +765,9 @@ rps_strftime_centiseconds(char *bfr, size_t len, const char *fmt, double tm)
 
 
 
-/// this rps_extend_env is called early from main.  It is extending
+/// This rps_extend_env is called early from main.  It is extending
 /// the Unix environment.
+/// Try running ./refpersys "--run-after-load=env|grep REFPERSYS" --batch
 void
 rps_extend_env(void)
 {
@@ -737,19 +777,28 @@ rps_extend_env(void)
   extended = true;
   static char pidenv[64];
   snprintf(pidenv, sizeof(pidenv), "REFPERSYS_PID=%d", (int)getpid());
-  putenv(pidenv);
-  static char gitenv[64];
+  putenv(pidenv);     // e.g. REFPERSYS_PID=2345
+  static char shortgitenv[64];
+  snprintf(shortgitenv, sizeof(shortgitenv), "REFPERSYS_SHORTGITID=%s", rps_shortgitid);
+  putenv(shortgitenv);  // e.g. REFPERSYS_SHORTGITID=49466057bf7d+
+  static char gitenv[128];
   snprintf(gitenv, sizeof(gitenv), "REFPERSYS_GITID=%s", rps_gitid);
-  putenv(gitenv);
+  putenv(gitenv);  // e.g. REFPERSYS_GITID=494...90+ with 40 hexdigit
   static char topdirenv[384];
   snprintf(topdirenv, sizeof(topdirenv), "REFPERSYS_TOPDIR=%s", rps_topdirectory);
-  putenv(topdirenv);
-  static char fifoenv[256];
+  putenv(topdirenv); // e.g. REFPERSYS_TOPDIR=$HOME/work/RefPerSys/
   if (!rps_fifo_prefix.empty())
     {
+      static char fifoenv[256];
       snprintf(fifoenv, sizeof(fifoenv), "REFPERSYS_FIFO_PREFIX=%s", rps_fifo_prefix.c_str());
-      putenv(fifoenv);
-    }
+      putenv(fifoenv); // e.g. REFPERSYS_FIFO_PREFIX=$HOME/tmp/rpsfifo
+    };
+  if (!rps_run_name.empty())
+    {
+      static char runamenv[256];
+      snprintf(runamenv, sizeof(runamenv), "REFPERSYS_RUN_NAME=%s", rps_run_name.c_str());
+      putenv(runamenv);   // e.g. REFPERSYS_RUN_NAME=testflk3.x
+    };
 } // end rps_extend_env
 
 
@@ -835,6 +884,18 @@ rps_early_initialization(int argc, char** argv)
              err);
       exit(EXIT_FAILURE);
     };
+  if (argc == 2 && !strcmp(argv[1], "--full-git"))   /// see also rps_parse1opt
+    {
+      printf("%s\n", rps_gitid);
+      fflush(nullptr);
+      exit(EXIT_SUCCESS);
+    }
+  else if (argc == 2 && !strcmp(argv[1], "--short-git"))  /// see also rps_parse1opt
+    {
+      printf("%s\n", rps_shortgitid);
+      fflush(nullptr);
+      exit(EXIT_SUCCESS);
+    }
   rps_start_monotonic_time = rps_monotonic_real_time();
   rps_start_wallclock_real_time = rps_wallclock_real_time();
   if (!inside_emacs)
@@ -865,11 +926,6 @@ rps_early_initialization(int argc, char** argv)
              strerror(errno));
       exit(EXIT_FAILURE);
     };
-  // initialize GNU lightning see
-  // lists.gnu.org/archive/html/lightning/2023-10/msg00020.html
-  // ... Notice that a recent GNU lightning is required, see
-  // https://lists.gnu.org/archive/html/lightning/2023-11/msg00012.html
-  init_jit (rps_progname);
   // compute the program invocation string
   rps_compute_program_invocation(argc, argv);
   rps_main_thread_handle = pthread_self();
@@ -1058,6 +1114,10 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
       rps_publisher_url_str = arg;
     }
     return 0;
+    case RPSPROGOPT_PREFERENCES_HELP:
+    {
+    }
+    return 0;
     case RPSPROGOPT_DUMP:
     {
       if (side_effect)
@@ -1137,6 +1197,17 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
       else
         RPS_INFORMOUT("echo:" << std::string(arg)
                       << " git:" << rps_shortgitid);
+    }
+    return 0;
+    case RPSPROGOPT_USER_PREFERENCES:
+      /// example argument: -U ~/myrefpersys.pref
+      /// other example: --user-pref=$HOME/myrps.pref
+    {
+      if (access(arg, R_OK))
+        rps_set_user_preferences(arg);
+      else
+        RPS_FATALOUT("missing user preferences file " << arg
+                     << ":" << strerror(errno));
     }
     return 0;
     case RPSPROGOPT_RUN_DELAY:
@@ -1257,6 +1328,26 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
         rps_pidfile_path = arg;
     }
     return 0;
+    case RPSPROGOPT_FULL_GIT:
+    {
+      if (side_effect)   /// see also rps_early_initialization
+        {
+          printf("%s\n", rps_gitid);
+          fflush(nullptr);
+          exit(EXIT_SUCCESS);
+        }
+    }
+    return 0;
+    case RPSPROGOPT_SHORT_GIT:
+    {
+      if (side_effect)   /// see also rps_early_initialization
+        {
+          printf("%s\n", rps_shortgitid);
+          fflush(nullptr);
+          exit(EXIT_SUCCESS);
+        }
+    }
+    return 0;
     case RPSPROGOPT_NO_ASLR:
     {
       // was already handled
@@ -1292,9 +1383,9 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
     case RPSPROGOPT_EXTRA_ARG:
     {
       int eqnextpos= -1;
-      char extraname[64];
+      char extraname[80];
       memset (extraname, 0, sizeof(extraname));
-      if (sscanf(arg, "%60[A-Za-z0-9]=%n", extraname, &eqnextpos) >= 1
+      if (sscanf(arg, "%72[A-Za-z0-9_]=%n", extraname, &eqnextpos) >= 1
           && isalpha(extraname[0])
           && eqnextpos > 1 && arg[eqnextpos-1] == '='
           && isalpha(extraname[0]))
@@ -1308,12 +1399,13 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
           std::string extraval{arg+eqnextpos};
           rps_dict_extra_arg.insert({extraname, extraval});
           RPS_INFORMOUT("set extra argument " << extraname
-                        << " to " << Rps_QuotedC_String(extraval));
+                        << " to '" << Rps_QuotedC_String(extraval)
+                        << "'");
         }
       else
         RPS_FATALOUT("bad extra named argument " << arg
-                     << " that is " << Rps_QuotedC_String(arg)
-                     << " extra name is " << Rps_QuotedC_String(extraname)
+                     << " that is '" << Rps_QuotedC_String(arg)
+                     << "' extra name is '" << Rps_QuotedC_String(extraname) << '"'
                     );
     }
     return 0;
@@ -1555,10 +1647,10 @@ rps_schedule_files_postponed_removal(void)
   for  (auto rf: rps_postponed_removed_files_vector)
     {
       if (rps_syslog_enabled)
-        syslog(LOG_NOTICE, "*rm  %s",  Rps_QuotedC_String(rf).c_str());
+        syslog(LOG_NOTICE, "*rm  %s",  Rps_SingleQuotedC_String(rf).c_str());
       else
-        printf(" *rm %s\n", Rps_QuotedC_String(rf).c_str());
-      fprintf(pat, "/bin/rm -f %s\n", Rps_QuotedC_String(rf).c_str());
+        printf(" *rm %s\n", Rps_SingleQuotedC_String(rf).c_str());
+      fprintf(pat, "/bin/rm -f %s\n", Rps_SingleQuotedC_String(rf).c_str());
     }
   rps_postponed_removed_files_vector.clear();
   pclose(pat);
@@ -1662,7 +1754,7 @@ rps_fatal_stop_at (const char *filnam, int lin)
           if (isplainarg)
             outl << ' ' << curarg;
           else
-            outl << ' ' << Rps_QuotedC_String(curarg);
+            outl << ' ' << Rps_SingleQuotedC_String(curarg);
         }
       outl << std::endl << std::flush;
       syslog(LOG_EMERG, "RefPerSys fatal from %s", outl.str().c_str());
@@ -1692,7 +1784,7 @@ rps_fatal_stop_at (const char *filnam, int lin)
           if (isplainarg)
             std::clog << ' ' << curarg;
           else
-            std::clog << ' ' << Rps_QuotedC_String(curarg);
+            std::clog << ' ' << Rps_SingleQuotedC_String(curarg);
         }
       std::clog << std::endl << std::flush;
     }

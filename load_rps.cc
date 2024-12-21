@@ -479,7 +479,7 @@ Rps_Loader::initialize_root_objects(void)
 #define RPS_INSTALL_ROOT_OB(Oid) do {   \
     if (!RPS_ROOT_OB(Oid))      \
       RPS_ROOT_OB(Oid)        \
-  = find_object_by_oid(Rps_Id(#Oid)); \
+  = find_object_by_oid(Rps_Id(#Oid));   \
     RPS_ASSERT(RPS_ROOT_OB(Oid));   \
   } while(0);
 #include "generated/rps-roots.hh"
@@ -548,7 +548,8 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                    << "... with objbuf:" << std::endl
                    << objbuf
                    << std::endl << "... and objjson:" << objjson);
-    }
+    };
+  //// now load the various JSON members
   Json::Value oidjson = objjson["oid"];
   if (oidjson.asString() != objid.to_string())
     RPS_FATALOUT("parse_json_buffer_second_pass spacid=" << spacid
@@ -645,7 +646,7 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                      << " lineno:" << lineno << ", spacid:" << spacid
                      << ":: " << dlerror());
       obz->loader_put_magicattrgetter(this, reinterpret_cast<rps_magicgetterfun_t*>(funad));
-    }
+    };        // end with "magicattr" JSON member
   if (objjson.isMember("applying"))
     {
       RPS_DEBUG_LOG(LOAD, "parse_json_buffer_second_pass applying objid=" << objid);
@@ -664,7 +665,7 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                      << " lineno:" << lineno << ", spacid:" << spacid
                      << ":: " << dlerror());
       obz->loader_put_applyingfunction(this, reinterpret_cast<rps_applyingfun_t*>(funad));
-    }
+    };        // end with "applying" JSON member
   if (objjson.isMember("payload"))
     {
       rpsldpysig_t*pldfun = nullptr;
@@ -717,7 +718,7 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                        << " without loading function"
                        << std::endl);
         }
-    }
+    }; //// end handling of "payload" JSON member
   if (obz->is_instance_of(RPS_ROOT_OB(_3O1QUNKZ4bU02amQus) //∈rps_routine
                          ))
     {
@@ -738,7 +739,30 @@ Rps_Loader::parse_json_buffer_second_pass (Rps_Id spacid, unsigned lineno,
                     << ":: " << dlerror());
       else
         obz->loader_put_applyingfunction(this, reinterpret_cast<rps_applyingfun_t*>(funad));
-    }
+    };
+
+  if (objjson.isMember("loadrout"))
+    {
+      auto loadroutstr = objjson["loadrout"].asString();
+      std::lock_guard<std::recursive_mutex> gu(ld_mtx);
+      if (loadroutstr.empty())
+        RPS_WARNOUT("invalid loadrout for loading routine function of objid:" <<  objid
+                    << Rps_ObjectRef(obz)
+                    << " lineno:" << lineno << ", spacid:" << spacid
+                    << std::endl << objjson);
+      else
+        {
+          void*ldroutad = dlsym(rps_proghdl, loadroutstr.c_str());
+          if (!ldroutad)
+            RPS_WARNOUT("cannot dlsym " << loadroutstr
+                        << " for loading routine function of objid:" <<  objid
+                        << Rps_ObjectRef(obz)
+                        << " lineno:" << lineno << ", spacid:" << spacid
+                        << ":: " << dlerror());
+          rpsldpysig_t*ldrout = (rpsldpysig_t*)ldroutad;
+          (*ldrout)(obz, this, objjson, spacid, lineno);
+        };
+    };        // end if has "loadrout" member
   RPS_DEBUG_LOG(LOAD, "parse_json_buffer_second_pass end objid=" << objid << " #" << count
                 << std::endl);
 } // end of Rps_Loader::parse_json_buffer_second_pass
@@ -826,6 +850,9 @@ Rps_Loader::second_pass_space(Rps_Id spacid)
 void
 Rps_Loader::load_all_state_files(void)
 {
+  const char*thisprog = (rps_progexe[0]?rps_progexe
+                         :rps_progname?rps_progname:"*RefPerSys*");
+  RPS_ASSERT(thisprog != nullptr);
   RPS_DEBUG_LOG(LOAD, "Rps_Loader::load_all_state_files start this@" << (void*)this
                 << std::endl << RPS_FULL_BACKTRACE_HERE(0, "RpsLoader::load_all_state_files"));
   int spacecnt1 = 0, spacecnt2 = 0;
@@ -833,14 +860,13 @@ Rps_Loader::load_all_state_files(void)
   first_pass_space(initialspaceid);
   spacecnt1++;
   initialize_root_objects();
-  int todocount = 0;
   for (Rps_Id spacid: ld_spaceset)
     {
       if (spacid != initialspaceid)
         first_pass_space(spacid);
       spacecnt1++;
     }
-  RPS_INFORMOUT("loaded " << spacecnt1 << " space files in first pass");
+  RPS_INFORM("%s loaded %d space files in first pass", thisprog, spacecnt1);
   initialize_constant_objects();
   /// conceptually, the second pass might be done in parallel
   /// (multi-threaded, with different threads working on different
@@ -857,11 +883,19 @@ Rps_Loader::load_all_state_files(void)
       // we sleep a tiny bit, so elapsed time is growing...
       usleep(20);
     };
-  RPS_DEBUG_LOG(LOAD, "Rps_Loader::load_all_state_files end this@" << (void*)this);
-  RPS_INFORMOUT("loaded " << spacecnt1 << " space files in second pass with "
-                << ld_mapobjects.size() << " objects and " << todocount << " todos" << std::endl);
-  RPS_DEBUG_LOG(LOAD, "Rps_Loader::load_all_state_files end this@" << (void*)this
-                << std::endl << RPS_FULL_BACKTRACE_HERE(0, "RpsLoader::load_all_state_files"));
+  RPS_DEBUG_LOG(LOAD, "Rps_Loader::load_all_state_files end this@"
+                << (void*)this);
+  RPS_INFORM("%s loaded %d space files in first pass,\n"
+             " %d space files in second passes,\n"
+             " %ld objects from directory %s,\n"
+             " in %.2f real sec (pid %ld on host %s git %s)",
+             thisprog,
+             spacecnt1, spacecnt2, (long)ld_mapobjects.size(),
+             ld_topdir.c_str(), rps_wallclock_real_time() - ld_startclock,
+             (long)getpid(), rps_hostname(), rps_shortgitid);
+  RPS_DEBUG_LOG(LOAD, "Rps_Loader::load_all_state_files end this@"
+                << (void*)this << std::endl
+                << RPS_FULL_BACKTRACE_HERE(0, "RpsLoader::load_all_state_files"));
 } // end Rps_Loader::load_all_state_files
 
 
@@ -1339,10 +1373,10 @@ Rps_Loader::parse_manifest_file(void)
                 {
                   std::string buildcmdstr;
                   buildcmdstr += rps_topdirectory;
-                  buildcmdstr += "/build-plugin.sh";
+                  buildcmdstr += "/do-build-refpersys-plugin";
                   buildcmdstr += " ";
                   buildcmdstr += pluginsrcpath;
-                  buildcmdstr += " ";
+                  buildcmdstr += " -o ";
                   buildcmdstr += pluginsopath;
                   RPS_INFORMOUT("before building plugin #" << ix << " using " << buildcmdstr);
                   fflush(nullptr);

@@ -94,6 +94,9 @@ struct event_loop_data_st
 extern "C" struct event_loop_data_st rps_eventloopdata;
 struct event_loop_data_st rps_eventloopdata;
 
+/// for debugging purposes, a string explaining the rps_eventloopdata
+extern "C" std::string rps_eventloop_explstring(void);
+
 static std::mutex rps_jsonrpc_mtx; /// common mutex for below buffers
 #warning TODO: maybe command and response should use std::stringstream?
 static std::stringbuf rps_jsonrpc_cmdbuf; /// buffer for commands written to JSONRPC GUI process
@@ -130,6 +133,7 @@ rps_do_stop_event_loop(void)
   RPS_DEBUG_LOG(REPL, "rps_do_stop_event_loop thread:"
                 <<  rps_current_pthread_name()
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_do_stop_event_loop"));
+  RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
   rps_stop_event_loop_flag.store(true);
   if (rps_fltk_enabled ())
     {
@@ -145,6 +149,7 @@ rps_self_pipe_write_byte(unsigned char b)
 {
   RPS_ASSERT(b != (char)0);
   std::lock_guard<std::recursive_mutex> gu(rps_eventloopdata.eld_mtx);
+  RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
   rps_eventloopdata.eld_selfpipefifo.push_back(b);
 } // end rps_self_pipe_write_byte
 
@@ -154,7 +159,7 @@ rps_register_event_loop_prepoller(std::function<void (struct pollfd*, int npoll,
 {
   std::lock_guard<std::recursive_mutex> gu(rps_eventloopdata.eld_mtx);
   RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
-  int ln = rps_eventloopdata.eld_prepollvect.size();
+  int ln = (int) rps_eventloopdata.eld_prepollvect.size();
   if (ln > 1000)
     RPS_FATALOUT("too many event loop prepoller " << ln);
   for (int i=0; i<ln; i++)
@@ -175,7 +180,7 @@ rps_unregister_event_loop_prepoller(int rank)
 {
   std::lock_guard<std::recursive_mutex> gu(rps_eventloopdata.eld_mtx);
   RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
-  if (rank<0 || rank>rps_eventloopdata.eld_prepollvect.size())
+  if (rank<0 || rank>(int) rps_eventloopdata.eld_prepollvect.size())
     {
       RPS_WARNOUT("invalid rank to rps_unregister_event_loop_prepoller " << rank);
       return;
@@ -644,8 +649,29 @@ rps_jsonrpc_initialize(void)
                 << " thread:" << rps_current_pthread_name());
 } // end rps_jsonrpc_initialize
 
+std::string
+rps_eventloop_explstring(void)
+{
+  std::lock_guard<std::recursive_mutex> gu(rps_eventloopdata.eld_mtx);
+  char numbuf[32];
+  memset(numbuf, 0, sizeof(numbuf));
+  RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
+  std::ostringstream out;
+  double elapsed_age = rps_elapsed_real_time() - rps_eventloopdata.eld_startelapsedtime;
+  double cpu_age = rps_process_cpu_time() - rps_eventloopdata.eld_startcputime;
+  snprintf(numbuf, sizeof(numbuf), "%.2f", elapsed_age);
+  out << numbuf << " elap";
+  snprintf(numbuf, sizeof(numbuf), "%.3f", cpu_age);
+  out << "," << numbuf << " cpu time";
+#warning rps_eventloop_explstring very incomplete
+  out << std::flush;
+  return out.str();
+} // end rps_eventloop_explstring
 
 
+
+
+////////////////////////////////////////////////////////////////
 /* TODO: an event loop using poll(2) and also handling SIGCHLD using
    https://man7.org/linux/man-pages/man2/signalfd.2.html
  */
@@ -653,10 +679,10 @@ void
 rps_event_loop(void)
 {
   /// see https://man7.org/linux/man-pages/man2/poll.2.html
-  int nbfdpoll=0; /// number of polled file descriptors, second argument to poll(2)
-  long pollcount=0;
-  double startelapsedtime=rps_elapsed_real_time();
-  double startcputime=rps_process_cpu_time();
+  int nbfdpoll = 0; /// number of polled file descriptors, second argument to poll(2)
+  long pollcount = 0;
+  double startelapsedtime = rps_elapsed_real_time();
+  double startcputime = rps_process_cpu_time();
   RPS_DEBUG_LOG(REPL, "rps_event_loop starting elapsedtime=" << startelapsedtime
                 << " cputime=" << startcputime
                 << " thread:" << rps_current_pthread_name() << std::endl
@@ -690,8 +716,8 @@ rps_event_loop(void)
 #warning TODO: consider using rps_timer ...?
   /*** give output
    ***/
-  RPS_INFORMOUT("starting rps_event_loop in pid " << (long)getpid()
-                << " on " << rps_hostname()
+  RPS_INFORMOUT("starting rps_event_loop in pid " << (long)getpid() << std::endl
+                << "... on " << rps_hostname() << " thread " << rps_current_pthread_name()
                 << " git " << rps_shortgitid << std::endl
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_event_loop")
                );
@@ -708,13 +734,15 @@ rps_event_loop(void)
       if ((loopcnt-1) % 16 == 0)
         {
           RPS_DEBUG_LOG(REPL, "looping rps_event_loop #" << loopcnt
+                        << " elapsed:" << rps_elapsed_real_time()
                         << " thread:" << rps_current_pthread_name()
                         << ((rps_fltk_enabled())?" with FLTK": " without-fltk")
                         << std::endl
                         << RPS_FULL_BACKTRACE_HERE(1, "rps_event_loop/looping"));
         }
       else
-        RPS_DEBUG_LOG(REPL, "looping rps_event_loop #" << loopcnt);
+        RPS_DEBUG_LOG(REPL, "looping rps_event_loop #" << loopcnt
+                      << " elapsed:" << rps_elapsed_real_time());
       memset ((void*)&pollarr, 0, sizeof(pollarr));
       nbfdpoll=0;
       struct rps_fifo_fdpair_st fdp = rps_get_gui_fifo_fds();
@@ -1031,7 +1059,10 @@ rps_event_loop(void)
         };
       fflush(nullptr);
     };       // end while not rps_stop_event_loop_flag
-
+  {
+    std::lock_guard<std::recursive_mutex> gu(rps_eventloopdata.eld_mtx);
+    rps_eventloopdata.eld_eventloopisactive.store(true);
+  }
   /*TODO: cooperation with transientobj_rps.cc ... */
 #warning incomplete rps_event_loop see related file transientobj_rps.cc, missing code
   /*TODO: use Rps_PayloadUnixProcess::do_on_active_process_queue to collect file descriptors inside such payloads */
@@ -1054,6 +1085,13 @@ rps_event_loop(void)
 } // end rps_event_loop
 
 
+bool
+rps_is_active_event_loop(void)
+{
+  RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
+  return rps_eventloopdata.eld_eventloopisactive.load();
+} // end rps_is_active_event_loop
+
 void
 rps_sigfd_read_handler(Rps_CallFrame*cf, int fd, void* data)
 {
@@ -1062,6 +1100,7 @@ rps_sigfd_read_handler(Rps_CallFrame*cf, int fd, void* data)
                  << " data:" << data
                  << RPS_FULL_BACKTRACE_HERE(1, "rps_sigfd_read_handler"));
   RPS_ASSERT (rps_eventloopdata.eld_sigfd>0);
+  RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
   struct signalfd_siginfo infsig;
   memset(&infsig, 0, sizeof(infsig));
   RPS_ASSERT(fd == rps_eventloopdata.eld_sigfd);
@@ -1125,6 +1164,7 @@ rps_timerfd_read_handler(Rps_CallFrame*cf, int fd, void* data)
                  << " data:" << data
                  << " thread:" << rps_current_pthread_name() << std::endl
                  << RPS_FULL_BACKTRACE_HERE(1, "rps_timerfd_read_handler"));
+  RPS_ASSERT(rps_eventloopdata.eld_magic == RPS_EVENTLOOPDATA_MAGIC);
 #warning unimplemented rps_timerfd_read_handler
   RPS_FATALOUT("unimplemented rps_timerfd_read_handler fd#" << fd);
 } // end rps_timerfd_read_handler

@@ -954,7 +954,9 @@ Rps_TokenSource::get_delimiter(Rps_CallFrame*callframe)
       loopcnt ++;
       _f.delimv = paylstrdict->find(delimstr);
       RPS_DEBUG_LOG(REPL, "Rps_TokenSource::get_delimiter punctuation delimv=" << _f.delimv << " for delimstr='"
-                    << Rps_Cjson_String(delimstr) << "' loopcnt#" << loopcnt);
+                    << Rps_Cjson_String(delimstr)
+                    << "' loopcnt#" << loopcnt
+                    << " dict@*" << *(paylstrdict->owner()));
       if (_f.delimv)
         {
           _f.lexkindob = RPS_ROOT_OB(_2wdmxJecnFZ02VGGFK); //repl_delimiter∈class
@@ -991,9 +993,12 @@ Rps_TokenSource::get_delimiter(Rps_CallFrame*callframe)
         break;
       unsigned curlen = delimstr.size();
       unsigned prevlen = (delimstr.c_str()+delimstr.size() - (const char*)prevu8) +1;
-      RPS_DEBUG_LOG(REPL, "Rps_TokenSource::get_delimiter for delimstr='" << delimstr <<"' curlen=" << curlen
-                    << " prevlen=" << prevlen);
-      if (prevlen==0 || prevlen > delimstr.size())
+      RPS_DEBUG_LOG(REPL, "Rps_TokenSource::get_delimiter for delimstr='"
+                    << delimstr <<"' curlen=" << curlen
+                    << " prevlen=" << prevlen
+                    << " prevu8='" << Rps_Cjson_String((const char*)prevu8)
+                    << "'");
+      if (prevlen==0 || prevlen > curlen)
         break;
       delimstr[prevlen] = (char)0; /// facilitates debugging, in principle useless
       delimstr.resize(prevlen);
@@ -1003,7 +1008,14 @@ Rps_TokenSource::get_delimiter(Rps_CallFrame*callframe)
       usleep (250000);
     }
   RPS_WARNOUT("Rps_TokenSource::get_delimiter failing at " << startpos
-              << " for " << startp << " in " << *this);
+              << " for " << startp << " in " << *this << std::endl
+              << " git " << rps_gitid << " timestamp " << rps_timestamp
+              << " delimstr='"  << Rps_Cjson_String(delimstr)
+              << "'"
+              << std::endl << " host:" << rps_hostname()
+              << std::endl << " procversion:" << rps_get_proc_version()
+              << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "Rps_TokenSource::get_delimiter-fail"));
   std::string failmsg {"Rps_TokenSource::get_delimiter failing at "};
   failmsg += startpos;
   throw std::runtime_error{failmsg};

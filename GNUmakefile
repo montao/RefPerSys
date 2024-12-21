@@ -33,8 +33,8 @@
 ## tell GNU make to export all variables by default
 export
 
-RPS_GIT_ID:= $(shell ./do-generate-gitid.sh)
-RPS_SHORTGIT_ID:= $(shell ./do-generate-gitid.sh -s)
+RPS_GIT_ID:= $(shell ./rps-generate-gitid.sh)
+RPS_SHORTGIT_ID:= $(shell ./rps-generate-gitid.sh -s)
 RPS_MAKE:= $(MAKE)
 RPS_BISON := /usr/bin/bison
 RPS_HOST := $(shell /bin/hostname -f)
@@ -42,12 +42,19 @@ RPS_ARCH := $(shell /bin/uname -m)
 RPS_OPERSYS := $(shell /bin/uname -o | /bin/sed 1s/[^a-zA-Z0-9_]/_/g )
 RPS_ATSHARP := $(shell printf '@#')
 RPS_HOMETMP := $(shell echo '$$HOME/tmp')
+
+
+## REFPERSYS_LTO is by convention for link-time optimization flags
+
 #                                                                
 .DEFAULT_GOAL: refpersys
 .PHONY: all config objects showtests clean distclean gitpush gitpush2 \
         print-plugin-settings indent redump clean-plugins plugins \
+        lto-refpersys \
         test00 test01 test01a test01b test01c test01d test01e test01f \
-        test02 test03 test05 test06 test07 test07a test08 test09 test-load \
+        test02 test03 test03nt test04 \
+        test05 test06 test07 test07a \
+        test08 test09 test-load \
 	testfltk1 testfltk2 testfltk3 testfltk4
 
 SYNC=/bin/sync
@@ -55,11 +62,11 @@ SYNC=/bin/sync
 ## a formatter to restrict width to 75 columns
 FMT=/usr/bin/fmt
 
-## a C++ indenter and its flags
+## a C and C++ indenter and its flags
 ASTYLE=/usr/bin/astyle
 ASTYLEFLAGS= --verbose --style=gnu  --indent=spaces=2  --convert-tabs
 
-CFLAGS= -O -g -Wall
+CFLAGS= -O -g -Wall $(RPS_LTO)
 
 -include _config-refpersys.mk
 
@@ -69,7 +76,7 @@ REFPERSYS_HUMAN_CPP_SOURCES=$(wildcard *_rps.cc)
 ### corresponding object files
 REFPERSYS_HUMAN_CPP_OBJECTS=$(patsubst %.cc, %.o, $(REFPERSYS_HUMAN_CPP_SOURCES))
 
-### Generated C++ sources
+### Generated C++ sources which are written at dump time and needs to be git managed
 REFPERSYS_GENERATED_CPP_SOURCES := $(wildcard generated/*.cc)
 
 ### corresponding object files
@@ -82,11 +89,13 @@ RPS_ALTDUMPDIR_PREFIX?= /tmp/refpersys-$(RPS_SHORTGIT_ID)
 ## unistring is https://www.gnu.org/software/libunistring/
 ## backtrace is https://github.com/ianlancetaylor/libbacktrace (also inside GCC source)
 ## libgccjit is https://gcc.gnu.org/onlinedocs/jit/ but not useful yet
-REFPERSYS_NEEDED_LIBRARIES= -lunistring -lbacktrace
+## try using GNU lightning is from https://www.gnu.org/software/lightning/ (for machine code generation)
+REFPERSYS_NEEDED_LIBRARIES= -llightning -lunistring -lbacktrace -lgmp
 ## TODO after june 2024, add the libgccjit...
 
 ### desired plugins (their basename under plugins_dir/)
-REFPERSYS_DESIRED_PLUGIN_BASENAMES= rpsplug_simpinterp
+### Basile removed _rpsplug_gramrepl in sept. 2024
+REFPERSYS_DESIRED_PLUGIN_BASENAMES= rpsplug_simpinterp 
 
 all:
 	@if [ -z "$(REFPERSYS_TOPDIR)" ]; then \
@@ -103,43 +112,68 @@ all:
 	   exit 1 ; \
 	fi
 	$(MAKE) refpersys
+	$(MAKE) do-build-refpersys-plugin
 	@/usr/bin/printf "\n\n\nMaking RefPerSys plugins\n\n"
 	$(MAKE) plugins
 
+objects: $(REFPERSYS_HUMAN_CPP_OBJECTS) $(REFPERSYS_GENERATED_CPP_OBJECTS)  __timestamp.o
 
-.SECONDARY:  __timestamp.c  #gramrepl_rps.yy gramrepl_rps.cc  gramrepl_rps.hh
+.SECONDARY:  __timestamp.c 
 	$(SYNC)
 
-config: do-configure-refpersys do-scan-pkgconfig GNUmakefile
+lto-refpersys:
+	$(MAKE) clean
+	$(RM) __timestamp.o
+	$(MAKE) -j3 REFPERSYS_LTO=-flto objects
+	$(REFPERSYS_CXX) -flto -rdynamic \
+             $(REFPERSYS_COMPILER_FLAGS) \
+             $(REFPERSYS_LINKER_FLAGS) \
+             -o $@ \
+             $(REFPERSYS_HUMAN_CPP_OBJECTS) \
+             $(REFPERSYS_GENERATED_CPP_OBJECTS) __timestamp.o \
+	      $(shell $(REFPERSYS_CXX) -print-file-name=libbacktrace.a) \
+              $(shell $(REFPERSYS_FLTKCONFIG) -g --ldflags) \
+              -L/usr/local/lib $(REFPERSYS_NEEDED_LIBRARIES) \
+               $(REFPERSYS_LINKER_FLAGS) \
+              $(shell pkg-config --libs $(sort $(PACKAGES_LIST))) -ldl
+
+config: do-configure-refpersys do-scan-refpersys-pkgconfig GNUmakefile
 	./do-configure-refpersys
 	$(MAKE) _scanned-pkgconfig.mk
 
-do-configure-refpersys: do-configure-refpersys.c |GNUmakefile do-generate-gitid.sh
-	$(CC) -Wall -Wextra -DGIT_ID=\"$(shell ./do-generate-gitid.sh -s)\" \
-              -DOPERSYS=\"$(RPS_OPERSYS)\" \
-              -DARCH=\"$(RPS_ARCH)\" \
-              -DHOST=\"$(RPS_HOST)\" \
-              $(CFLAGS) $^ -o $@ -lreadline
-## if GNU readline library is unavailable add -DWITHOUT_READLINE above
-## and remove the -lreadline above
+do-configure-refpersys: do-configure-refpersys.c |GNUmakefile rps-generate-gitid.sh
+	$(CC) -Wall -Wextra -DRPSCONF_GIT_ID=\"$(shell ./rps-generate-gitid.sh -s)\" \
+              -DRPSCONF_OPERSYS=\"$(RPS_OPERSYS)\" \
+              -DRPSCONF_ARCH=\"$(RPS_ARCH)\" \
+              -DRPSCONF_HOST=\"$(RPS_HOST)\" \
+              $(CFLAGS) $^ -o $@ -lreadline -lncurses -ldl
+## if GNU readline library is unavailable add
+## -DRPSCONF_WITHOUT_READLINE above and remove the -lreadline above
+## if GNU ncurses library is unavailable add
+## -DRPSCONF_WITHOUT_NCURSES above and remove the -lncurses above
 
-do-scan-pkgconfig: do-scan-pkgconfig.c |GNUmakefile do-generate-gitid.sh
-	$(CC) -Wall -Wextra -DGIT_ID=\"$(shell ./do-generate-gitid.sh -s)\" \
+do-scan-refpersys-pkgconfig: do-scan-refpersys-pkgconfig.c |GNUmakefile rps-generate-gitid.sh
+	$(CC) -Wall -Wextra -DGIT_ID=\"$(shell ./rps-generate-gitid.sh -s)\" \
               $(CFLAGS) $^ -o $@
 
-do-build-plugin: do-build-plugin.cc __timestamp.c
-	$(CXX) -Wall -Wextra  -DGIT_ID=\"$(shell ./do-generate-gitid.sh -s)\" -O -g $^ -o $@
+do-build-refpersys-plugin: do-build-refpersys-plugin.cc __timestamp.c
+	$(CXX) -Wall -Wextra  -DGIT_ID=\"$(shell ./rps-generate-gitid.sh -s)\" $(CFLAGS) -g $^ -o $@
 
 
 
 clean: clean-plugins
-	$(RM) tmp* *~ *.o do-configure-refpersys do-build-plugin refpersys
+	$(RM) tmp* *~ *.o
+	$(RM) do-scan-refpersys-pkgconfig do-configure-refpersys do-build-refpersys-plugin 
+	$(RM) refpersys lto-refpersys
 	$(RM) *% %~
 	$(RM) *.gch
 	$(RM) *.orig
 	$(RM) */*~ */*% */*.orig
 	$(RM) */*.so
 	$(RM) *.ii
+	$(RM) core*
+	$(RM) Make-dependencies/__*
+
 
 clean-plugins:
 	$(RM) -v plugins_dir/*.o
@@ -149,70 +183,90 @@ clean-plugins:
 
 distclean: clean
 	$(RM) build.time  _config-refpersys.mk  _scanned-pkgconfig.mk  __timestamp.*
-	$(RM) __*.mkdep
-	$(RM) do-scan-pkgconfig
+	$(RM) __*.mkdep Make-dependencies/__*.mkdep
+	$(RM) do-scan-refpersys-pkgconfig
 
 -include _scanned-pkgconfig.mk
 
--include $(wildcard __*.mkdep)
+-include $(wildcard Make-dependencies/__*.mkdep)
 
-_scanned-pkgconfig.mk: $(REFPERSYS_HUMAN_CPP_SOURCES) |GNUmakefile do-scan-pkgconfig
-	./do-scan-pkgconfig refpersys.hh $(REFPERSYS_HUMAN_CPP_SOURCES) > $@
+_scanned-pkgconfig.mk: $(REFPERSYS_HUMAN_CPP_SOURCES) |GNUmakefile do-scan-refpersys-pkgconfig
+	./do-scan-refpersys-pkgconfig refpersys.hh $(REFPERSYS_HUMAN_CPP_SOURCES) > $@
 
-__timestamp.c: do-generate-timestamp.sh GNUmakefile
+__timestamp.c: rps-generate-timestamp.sh GNUmakefile $(wildcard *.cc *.hh generated/*.cc generated *.hh)
 	@echo MAKE is "$(MAKE)" CXX is "$(REFPERSYS_CXX)" GPP is "$(REFPERSYS_GPP)" and "$(GPP)"
-	+env "MAKE=$(shell /bin/which gmake)" "CXX=$(REFPERSYS_CXX)" "GPP=$(REFPERSYS_GPP)" "CXXFLAGS=$(REFPERSYS_PREPRO_FLAGS) $(REFPERSYS_COMPILER_FLAGS)" ./do-generate-timestamp.sh $@ > $@
+	+env "MAKE=$(shell /bin/which gmake)" "CXX=$(REFPERSYS_CXX)" "GPP=$(REFPERSYS_GPP)" "CXXFLAGS=$(REFPERSYS_PREPRO_FLAGS) $(REFPERSYS_COMPILER_FLAGS)" ./rps-generate-timestamp.sh $@ > $@
 
 __timestamp.o: __timestamp.c |GNUmakefile
-	$(CC) -fPIC -c -O -g -Wall -DGIT_ID=\"$(shell ./do-generate-gitid.sh -s)\" $^ -o $@
+	$(CC) -fPIC $(RPS_LTO) -c -O -g -Wall -DGIT_ID=\"$(shell ./rps-generate-gitid.sh -s)\" $^ -o $@
 
-refpersys: $(REFPERSYS_HUMAN_CPP_OBJECTS)  $(REFPERSYS_GENERATED_CPP_OBJECTS) __timestamp.o |  GNUmakefile
+#was
+#refpersys: $(REFPERSYS_HUMAN_CPP_OBJECTS) \
+#               $(REFPERSYS_GENERATED_CPP_OBJECTS) \
+#                   __timestamp.c |  GNUmakefile
+refpersys: objects |  GNUmakefile
+	$(RM) __timestamp.o
+	$(MAKE) __timestamp.o
 	@if [ -z "$(REFPERSYS_CXX)" ]; then echo should make config ; exit 1; fi
 	@echo RefPerSys human C++ source files $(REFPERSYS_HUMAN_CPP_SOURCES)
 #       @echo RefPerSys human C++ object files $(REFPERSYS_HUMAN_CPP_OBJECTS)
 	@echo RefPerSys generated C++ files $(REFPERSYS_GENERATED_CPP_SOURCES)
 #	@echo RefPerSys generated C++ object files $(REFPERSYS_GENERATED_CPP_OBJECTS)
 	@echo PACKAGES_LIST is $(PACKAGES_LIST)
-	$(MAKE) $(REFPERSYS_HUMAN_CPP_OBJECTS) $(REFPERSYS_GENERATED_CPP_OBJECTS) __timestamp.o
+	@echo RPS_LTO is $(RPS_LTO)
+	@echo FLTKconfig is  $(REFPERSYS_FLTKCONFIG)
+	@echo FLTK stuff is  $(shell $(REFPERSYS_FLTKCONFIG) -g --ldflags)
+	@echo REFPERSYS_NEEDED_LIBRARIES is $(REFPERSYS_NEEDED_LIBRARIES)
+	@echo REFPERSYS_HUMAN_CPP_OBJECTS is $(REFPERSYS_HUMAN_CPP_OBJECTS) | /usr/bin/fmt | /bin/sed '2,$$s/^/ /'
+	@echo REFPERSYS_GENERATED_CPP_OBJECTS is $(REFPERSYS_GENERATED_CPP_OBJECTS) | /usr/bin/fmt | /bin/sed '2,$$s/^/ /'
+	$(MAKE) RPS_LTO=$(RPS_LTO) $(REFPERSYS_HUMAN_CPP_OBJECTS) $(REFPERSYS_GENERATED_CPP_OBJECTS) __timestamp.o
 	@if [ -x $@ ]; then /bin/mv -v --backup $@ $@~ ; fi
-	$(REFPERSYS_CXX) -rdynamic -o $@ \
+	$(REFPERSYS_CXX) $(RPS_LTO) -rdynamic -o $@ \
              $(REFPERSYS_HUMAN_CPP_OBJECTS) \
-             $(REFPERSYS_GENERATED_CPP_OBJECTS) __timestamp.o \
+             $(REFPERSYS_GENERATED_CPP_OBJECTS) \
+             __timestamp.o \
 	      $(shell $(REFPERSYS_CXX) -print-file-name=libbacktrace.a) \
-              -L/usr/local/lib $(REFPERSYS_NEEDED_LIBRARIES) \
               $(shell $(REFPERSYS_FLTKCONFIG) -g --ldflags) \
+              -L/usr/local/lib $(REFPERSYS_NEEDED_LIBRARIES) \
+              $(REFPERSYS_LINKER_FLAGS) \
               $(shell pkg-config --libs $(sort $(PACKAGES_LIST))) -ldl
-	@/bin/mv -v --backup __timestamp.c __timestamp.c%
 	@/bin/rm -vf __timestamp.o
 
 %.ii: %.cc | refpersys.hh GNUmakefile
 
-plugins: refpersys $(patsubst %, plugins_dir/%.so, $(REFPERSYS_DESIRED_PLUGIN_BASENAMES)) |GNUmakefile build-plugin.sh do-scan-pkgconfig
+plugins: |GNUmakefile do-build-refpersys-plugin do-scan-refpersys-pkgconfig
+	@printf "\n\n making plugins desired basenames=%s\n" "$(REFPERSYS_DESIRED_PLUGIN_BASENAMES)"
+	+$(MAKE) $(patsubst %, plugins_dir/%.so, $(REFPERSYS_DESIRED_PLUGIN_BASENAMES))
 
-plugins_dir/%.so: plugins_dir/%.cc refpersys.hh build-plugin.sh |GNUmakefile
+plugins_dir/%.so: plugins_dir/%.cc refpersys.hh do-build-refpersys-plugin |GNUmakefile
 	@printf "\n\nRefPerSys-gnumake building plugin %s from source %s in %s\n" "$@"  "$<"  "$$(/bin/pwd)"
-	@printf "RefPerSys-gnumaking plugin %s MAKE is %s RPS_MAKE is %s\n" "$@" "$(MAKE)" "$(RPS_MAKE)"
-	env PATH=$$PATH $(shell $(RPS_MAKE) -s print-plugin-settings) ./build-plugin.sh $< $@
-
-plugins_dir/_rpsplug_gramrepl.yy: attic/gramrepl_rps.yy.gpp refpersys.hh refpersys |GNUmakefile _config-refpersys.mk  _scanned-pkgconfig.mk
-	@printf "RefPerSys-gnumake building plugin GNU bison code %s from %s using $(REFPERSYS_GPP) in %s\n" "$@"  "$<"  "$$(/bin/pwd)"
-	$(REFPERSYS_GPP) -x -I generated/ -I . \
-            -DRPS_SHORTGIT="$(RPS_SHORTGIT_ID)" \
-            -DRPS_HOST=$(RPS_HOST) \
-            -DRPS_ARCH=$(RPS_ARCH) \
-            -DRPS_OPERSYS=$(RPS_OPERSYS) \
-            -DRPS_GPP_INPUT="$<"    -DRPS_GPP_OUTPUT="$@"    \
-            -DRPS_GPP_INPUT_BASENAME="$(basename $<)" \
-            -U  '@&'  '&@'  '('  '&,'  ')'  '('  ')' '$(RPS_ATSHARP)'   '\\'  \
-            -o $@ $<
+	@printf "RPS_MAKE is %s and MAKE is %s for refpersys plugin at=%s PATH=%s\n" \ "$(RPS_MAKE)" "$(MAKE)" "$@"  "$$PATH"
+	env PATH=$$PATH $(shell $(RPS_MAKE) -s print-plugin-settings) /usr/bin/printenv
+	env PATH=$$PATH $(shell $(RPS_MAKE) -s print-plugin-settings) ./do-build-refpersys-plugin -v $< -o $@
 
 
-plugins_dir/_rpsplug_gramrepl.cc: plugins_dir/_rpsplug_gramrepl.yy
-	$(RPS_BISON) --verbose --no-lines --warnings=all --color=tty \
-                     --language=c++ --debug  --token-table \
-                     --header=plugins_dir/_rpsplug_gramrepl.hh \
-                     --output=$@ \
-                   $<
+
+################################# obsolete stuff
+#plugins_dir/_rpsplug_gramrepl.yy: plugins_dir/gramrepl_rps.yy.gpp refpersys.hh refpersys |GNUmakefile _config-refpersys.mk  _scanned-pkgconfig.mk
+#	@printf "RefPerSys-gnumake building plugin GNU bison code %s from %s using $(REFPERSYS_GPP) in %s\n" "$@"  "$<"  "$$(/bin/pwd)"
+#	$(REFPERSYS_GPP) -x -I generated/ -I . \
+#            -DRPS_SHORTGIT="$(RPS_SHORTGIT_ID)" \
+#            -DRPS_HOST=$(RPS_HOST) \
+#            -DRPS_ARCH=$(RPS_ARCH) \
+#            -DRPS_OPERSYS=$(RPS_OPERSYS) \
+#            -DRPS_GPP_INPUT="$<"    -DRPS_GPP_OUTPUT="$@"    \
+#            -DRPS_GPP_INPUT_BASENAME="$(basename $<)" \
+#            -U  '@&'  '&@'  '('  '&,'  ')'  '('  ')' '$(RPS_ATSHARP)'   '\\'  \
+#            -o $@ $<
+#
+#
+#plugins_dir/_rpsplug_gramrepl.cc: plugins_dir/_rpsplug_gramrepl.yy
+#	$(RPS_BISON) --verbose --no-lines --warnings=all --color=tty \
+#                     --language=c++ --debug  --token-table \
+#                     --header=plugins_dir/_rpsplug_gramrepl.hh \
+#                     --output=$@ \
+#                   $<
+################################
 
 # Target to facilitate git push to both origin and GitHub mirrors
 gitpush:
@@ -225,7 +279,7 @@ else
 	@printf "using: %s\n" 'git remote add --mirror=push github git@github.com:RefPerSys/RefPerSys.git'
 endif
 	@printf "\n%s git-pushed commit %s of RefPerSys, branch %s ...\n" \
-	        "$$(git config --get user.email)" "$$(./do-generate-gitid.sh -s)" "$$(git branch | fgrep '*')"
+	        "$$(git config --get user.email)" "$$(./rps-generate-gitid.sh -s)" "$$(git branch | fgrep '*')"
 	@git log -1 --format=oneline --abbrev=12 --abbrev-commit -q | head -1
 	if [ -x $$HOME/bin/push-refpersys ]; then $$HOME/bin/push-refpersys $(shell /bin/pwd) $(RPS_SHORTGIT_ID); fi
 	$(SYNC)
@@ -252,6 +306,7 @@ load_rps.o: load_rps.cc refpersys.hh \
 	echo pkglist-refpersys is $(PKGLIST_refpersys)
 	echo pkglist-$(basename $(<F)) is $(PKGLIST_$(basename $(<F)))
 	$(REFPERSYS_CXX) $(REFPERSYS_PREPRO_FLAGS) $(REFPERSYS_COMPILER_FLAGS) \
+               -MD -MFMake-dependencies/__$(basename $(@F)).mkdep \
 	       $(shell pkg-config --cflags $(PKGLIST_refpersys)) \
                $(shell pkg-config --cflags $(PKGLIST_$(basename $(<F)))) \
                -DRPS_THIS_SOURCE=\"$<\" -DRPS_GITID=\"$(RPS_GIT_ID)\"  \
@@ -266,7 +321,7 @@ load_rps.o: load_rps.cc refpersys.hh \
 	echo pkglist-refpersys is $(PKGLIST_refpersys)
 	echo pkglist-$(basename $(<F)) is $(PKGLIST_$(basename $(<F)))	
 	$(REFPERSYS_CXX) $(REFPERSYS_PREPRO_FLAGS) $(REFPERSYS_COMPILER_FLAGS) \
-               -MD -MF__$(basename $(@F)).mkdep \
+               -MD -MFMake-dependencies/__$(basename $(@F)).mkdep \
 	       $(shell pkg-config --cflags $(PKGLIST_refpersys)) \
                $(shell pkg-config --cflags $(PKGLIST_$(basename $(<F)))) \
                -DRPS_THIS_SOURCE=\"$<\" -DRPS_GITID=\"$(RPS_GIT_ID)\"  \
@@ -280,7 +335,7 @@ load_rps.o: load_rps.cc refpersys.hh \
 	echo pkglist-refpersys is $(PKGLIST_refpersys)
 	echo pkglist-$(basename $(<F)) is $(PKGLIST_$(basename $(<F)))
 	$(REFPERSYS_CXX) -C -E $(REFPERSYS_PREPRO_FLAGS) $(REFPERSYS_COMPILER_FLAGS) \
-               -MD -MF__$(basename $(@F)).ii.mkdep \
+               -MD -MFMake-dependencies/__$(basename $(@F)).ii.mkdep \
 	       $(shell pkg-config --cflags $(PKGLIST_refpersys)) \
                $(shell pkg-config --cflags $(PKGLIST_$(basename $(<F)))) \
                -DRPS_THIS_SOURCE=\"$<\" -DRPS_GITID=\"$(RPS_GIT_ID)\"  \
@@ -294,7 +349,7 @@ fltk_rps.o: fltk_rps.cc refpersys.hh  $(wildcard generated/rps*.hh) | GNUmakefil
 	echo pkglist-$(basename $(<F)) is $(PKGLIST_$(basename $(<F)))
 	$(REFPERSYS_CXX) $(REFPERSYS_PREPRO_FLAGS) \
             $(REFPERSYS_COMPILER_FLAGS) \
-               -MD -MF__$(basename $(@F)).mkdep \
+               -MD -MFMake-dependencies/__$(basename $(@F)).mkdep \
 	       $(shell pkg-config --cflags $(PKGLIST_refpersys)) \
                $(shell pkg-config --cflags $(PKGLIST_$(basename $(<F)))) \
                -DRPS_THIS_SOURCE=\"$<\" -DRPS_GITID=\"$(RPS_GIT_ID)\"  \
@@ -314,7 +369,7 @@ fltk_rps.ii:  fltk_rps.cc refpersys.hh  $(wildcard generated/rps*.hh) | GNUmakef
 	echo pkglist-$(basename $(<F)) is $(PKGLIST_$(basename $(<F)))
 	$(REFPERSYS_CXX) -C -E $(REFPERSYS_PREPRO_FLAGS) \
             $(REFPERSYS_COMPILER_FLAGS) \
-               -MD -MF__$(basename $(@F)).ii.mkdep \
+               -MD -MFMake-dependencies/__$(basename $(@F)).ii.mkdep \
 	       $(shell pkg-config --cflags $(PKGLIST_refpersys)) \
                $(shell pkg-config --cflags $(PKGLIST_$(basename $(<F)))) \
                -DRPS_THIS_SOURCE=\"$<\" -DRPS_GITID=\"$(RPS_GIT_ID)\"  \
@@ -333,13 +388,15 @@ fltk_rps.ii:  fltk_rps.cc refpersys.hh  $(wildcard generated/rps*.hh) | GNUmakef
 	echo pkglist-$(basename $(<F)) is $(PKGLIST_$(basename $(<F)))
 	$(REFPERSYS_CXX) -c -std=gnu++17 -g -O $< -o $@
 
-## for plugins, see build-plugin.sh
+## for plugins, see do-build-refpersys-plugin.cc
 print-plugin-settings:
 	@printf "RPSPLUGIN_CXX='%s'\n" "$(REFPERSYS_CXX)"
 	@printf "RPSPLUGIN_CXXFLAGS='%s'\n" "$(REFPERSYS_PREPRO_FLAGS) $(REFPERSYS_COMPILER_FLAGS) $(shell pkg-config --cflags $(PKGLIST_refpersys))"
 	@printf "RPSPLUGIN_LDFLAGS='%s'\n"  "-rdynamic -pthread -L /usr/local/lib -L /usr/lib $(LIBES)"
 
 indent:
+	$(ASTYLE) $(ASTYLEFLAGS) do-configure-refpersys.c
+	$(ASTYLE) $(ASTYLEFLAGS) do-scan-refpersys-pkgconfig.c
 	$(ASTYLE) $(ASTYLEFLAGS) refpersys.hh
 	$(ASTYLE) $(ASTYLEFLAGS) oid_rps.hh
 	$(ASTYLE) $(ASTYLEFLAGS) inline_rps.hh
@@ -368,15 +425,17 @@ altredump:  ./refpersys
 ################################################################
 #### simple tests; the --run-name should start with test and not use $@ because of showtests target
 test00: refpersys
-	@printf '\n\n\n////test00 first\n'
+	@printf '\f\n\n\n\n////test00 first *****\n'
 	./refpersys  -AREPL  --test-repl-lexer 'show help' -B --run-name=test00.1
-	@printf '\n\n\n////test00 second\n'
+	@printf '\f\n\n\n\n////test00 second *****\n'
 	./refpersys  -AREPL  --test-repl-lexer 'show RefPerSys_system' -B --run-name=test00.2
-	@printf '\n\n\n////test00 third\n'
-	./refpersys  -AREPL  --test-repl-lexer 'show (1 + 2)' -B --run-name=test00.3
-	@printf '\n\n\n////test00 help REPL command\n'
-	./refpersys -AREPL -c help -B --run-name=test00.help
-	@printf '\n\n\n////test00 FINISHED¤\n'
+	@printf '\f\n\n\n////test00 third *****\n'
+	./refpersys  -AREPL  --test-repl-lexer '@show put' -B --run-name=test00.3
+	@printf '\f\n\n\n////test00 fourth *****\n'
+	./refpersys  -AREPL  --test-repl-lexer 'show (1 + 2)' -B --run-name=test00.4
+	@printf '\f\n\n\n////test00 help REPL command (fifth) ****\n'
+	./refpersys -AREPL -c help -B --run-name=test00.5
+	@printf '\n\n\n////test00 FINISHED¤\n\n'
 
 test01: refpersys
 	@echo test01 testing simple show help with a lot of debug
@@ -421,6 +480,15 @@ test03: refpersys
 	./refpersys -AREPL  -c 'show 1 + 2' -B --run-name=test03
 	@printf '\n\n\n////test03 FINISHED¤\n'
 
+## test03 no tty
+test03nt: refpersys
+	./refpersys --no-terminal -AREPL  -c 'show 1 + 2' -B --run-name=test03nt
+	@printf '\n\n\n////test03nt FINISHED¤\n'
+
+test03bis: refpersys
+	./refpersys -AREPL  -c 'show 1 + 2 + 3' -B --run-name=test03bis
+	@printf '\n\n\n////test03bis FINISHED¤\n'
+
 test04: refpersys
 	./refpersys -AREPL  -c 'show  1 * 2 + 3 * 4' -B --run-name=test04
 	@printf '\n\n\n////test04 FINISHED¤\n'
@@ -458,22 +526,25 @@ test-load: refpersys
 ## testing the FLTK graphical interface
 testfltk1: refpersys
 	@printf '%s git %s\n' $@ $(RPS_SHORTGIT_ID)
-	./refpersys -AREPL --run-name=testfltk1 --run-delay=6s  --fltk --pid-file=$(RPS_HOMETMP)/refpersys.pid
+	./refpersys -AREPL --run-name=$@ --run-delay=29s  \
+                    --fltk=$$HOME/fltk1-refpersys-pref \
+                    --pid-file=$(RPS_HOMETMP)/refpersys.pid
 	@printf '\n\n\n////testfltk1 FINISHED git %s¤\n' $(RPS_SHORTGIT_ID)
 
 testfltk2: refpersys
 	@printf '%s git %s\n' $@ $(RPS_SHORTGIT_ID)
-	./refpersys -dPROGARG -AREPL --run-delay=14s --fltk -bg ivory --run-name=testfltk2 --pid-file=$(RPS_HOMETMP)/refpersys.pid
+	./refpersys -dPROGARG -AREPL --run-delay=14s --fltk -bg ivory \
+                    --run-name=$@ --pid-file=$(RPS_HOMETMP)/refpersys.pid
 	@printf '\n\n\n////testfltk2 FINISHED git %s¤\n' $(RPS_SHORTGIT_ID)
 
 testfltk3: refpersys
 	@printf '%s git %s\n' $@ $(RPS_SHORTGIT_ID)
-	./refpersys -dPROGARG -AREPL --run-name=testfltk3 --run-delay=29s  --fltk -bg lightpink --pid-file=$(RPS_HOMETMP)/refpersys.pid
+	./refpersys -dPROGARG -AREPL --run-name=$@ --run-delay=29s  --fltk -bg lightpink --pid-file=$(RPS_HOMETMP)/refpersys.pid
 	@printf '\n\n\n////testfltk3 FINISHED git %s¤\n' $(RPS_SHORTGIT_ID)
 
 testfltk4: refpersys
 	@printf '%s git %s\n' $@ $(RPS_SHORTGIT_ID)
-	./refpersys -dPROGARG -AREPL --run-name=testfltk4 --run-delay=15m  --fltk -bg peachpuff --echo="hello from $@"
+	./refpersys -dPROGARG -AREPL --run-name=$@ --run-delay=15m  --fltk -bg peachpuff --echo="hello from $@"
 	@printf '\n\n\n////testfltk4 FINISHED git %s¤\n' $(RPS_SHORTGIT_ID)
 
 ########### show the testing commands

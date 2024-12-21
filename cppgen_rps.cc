@@ -31,7 +31,8 @@
  *
  * Notice:
  *    See also companion file lightgen_rps.cc for GNU lightning
- *    code generation.
+ *    code generation and the GCC MELT paper on
+ *    https://arxiv.org/abs/1109.0779
  ******************************************************************************/
 
 #include "refpersys.hh"
@@ -128,13 +129,44 @@ public:
   {
     return "cplusplusgen";
   };
-};
+  void output(std::function<void(std::ostringstream&out)> fun, bool raw=false);
+  void raw_output(std::function<void(std::ostringstream&out)> fun)
+  {
+    output (fun, /*raw:*/true);
+  };
+};        // end class  Rps_PayloadCplusplusGen
+
 
 Rps_PayloadCplusplusGen::Rps_PayloadCplusplusGen(Rps_ObjectZone*ob)
   : Rps_Payload(Rps_Type::PaylCplusplusGen,ob), cppgen_outcod(),
     cppgen_indentation(0), cppgen_path()
 {
 } // end Rps_PayloadCplusplusGen::Rps_PayloadCplusplusGen
+
+
+void
+Rps_PayloadCplusplusGen::output(std::function<void(std::ostringstream&out)> fun,
+                                bool raw)
+{
+  std::string buf;
+  std::ostringstream out(buf);
+  fun(out);
+  if (raw)
+    {
+      cppgen_outcod << buf;
+    }
+  else
+    {
+      for (char c: buf)
+        {
+          if (c=='\n')
+            cppgen_outcod << eol_indent();
+          else
+            cppgen_outcod << c;
+        };
+    }
+  cppgen_outcod.flush();
+} // end Rps_PayloadCplusplusGen::output
 
 void
 Rps_PayloadCplusplusGen::mark_gc_cppgen_data(Rps_GarbageCollector&gc, struct cppgen_data_st*d, unsigned depth)
@@ -152,7 +184,8 @@ Rps_PayloadCplusplusGen::check_size(int lineno)
 {
   char linbuf[16];
   memset(linbuf, 0, sizeof(linbuf));
-  if (lineno > 0) snprintf(linbuf, sizeof(linbuf), ":%d", lineno);
+  if (lineno > 0)
+    snprintf(linbuf, sizeof(linbuf), ":%d", lineno);
   if ((size_t)cppgen_outcod.tellp() > (size_t)maximal_size)
     {
       RPS_WARNOUT("in C++ generator " << owner()
@@ -541,7 +574,9 @@ Rps_PayloadCplusplusGen::emit_cplusplus_includes(Rps_ProtoCallFrame*callerframe,
       return false;
   });
   int nbinc = cppgen_datavect.size();
-  cppgen_outcod << "///++ " << nbinc << " includes:" << std::endl;
+  cppgen_outcod << "///++ " << nbinc << " includes in obmodule "
+                << _f.obmodule
+                << std::endl;
   for (int ix=0; ix<nbinc; ix++)
     {
       _f.obcurinclude = cppgen_datavect[ix].cppg_object;
@@ -585,7 +620,7 @@ Rps_PayloadCplusplusGen::emit_cplusplus_declarations(Rps_CallFrame*callerframe, 
   // TODO: we probably need a selector to send some message related to C++ declaration emission
   //
   // it could happen that the components number of the module is changing during the loop
-  for (int cix=0; cix<_f.obmodule->nb_components(&_); cix++)
+  for (int cix=0; cix<(int)_f.obmodule->nb_components(&_); cix++)
     {
       _f.obcomp = nullptr;
       std::lock_guard<std::recursive_mutex> gugenerator(*_f.obgenerator->objmtxptr());
@@ -629,7 +664,7 @@ Rps_PayloadCplusplusGen::emit_cplusplus_definitions(Rps_CallFrame*callerframe, R
   // TODO: we probably need a selector to send some message related to C++ definition emission
   //
   // It could happen that the components number of the module is changing during the loop
-  for (int cix=0; cix<_f.obmodule->nb_components(&_); cix++)
+  for (int cix=0; cix<(int)_f.obmodule->nb_components(&_); cix++)
     {
       _f.obcomp = nullptr;
       _f.vcomp = _f.obmodule->component_at(&_, cix, /*dontfail=*/true);
@@ -699,8 +734,41 @@ rps_generate_cplusplus_code(Rps_CallFrame*callerframe,
                            _f.obmodule);
   auto cppgenpayl = _f.obgenerator->put_new_plain_payload<Rps_PayloadCplusplusGen>();
   cppgenpayl->emit_initial_cplusplus_comment(&_, _f.obmodule);
+  cppgenpayl->clear_indentation();
+  cppgenpayl->output([&](std::ostringstream&out)
+  {
+    out << std::endl << std::endl;
+    out << "//// include files from " << _f.obmodule << std::endl;
+  });
   cppgenpayl->emit_cplusplus_includes(&_,  _f.obmodule);
-#warning missing code in rps_generate_cplusplus_code
+  cppgenpayl->clear_indentation();
+  cppgenpayl->output([&](std::ostringstream&out)
+  {
+    out << std::endl << std::endl;
+    out << "//// C++ declarations from " << _f.obmodule << std::endl;
+  });
+  cppgenpayl->emit_cplusplus_declarations(&_,  _f.obmodule);
+  cppgenpayl->clear_indentation();
+  cppgenpayl->output([&](std::ostringstream&out)
+  {
+    out << std::endl << std::endl;
+    out << "//// C++ definitions from " << _f.obmodule << std::endl;
+  });
+  cppgenpayl->emit_cplusplus_definitions(&_,  _f.obmodule);
+  cppgenpayl->clear_indentation();
+  cppgenpayl->output([&](std::ostringstream&out)
+  {
+    out << std::endl << std::endl;
+    out << "//// end of generated C++ from module " << _f.obmodule << " using generator "
+        << _f.obgenerator << " in refpersys git " <<  rps_cppgen_shortgitid
+        << " {<" __FILE__ ":" << __LINE__ << ">}" << std::endl;
+    out << std::flush;
+  });
+  RPS_WARNOUT("incomplete rps_generate_cplusplus_code obmodule="
+              << _f.obmodule << " generator=" << _f.obgenerator
+              << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rps_generate_cplusplus_code"));
+  return false;
 } // end rps_generate_cplusplus_code
 
 

@@ -112,6 +112,8 @@
 #include <dirent.h>
 #include <pthread.h>
 #include <limits.h>
+#include <locale.h>
+#include <libintl.h> //// gettext(3) and friends
 #include <stdlib.h>
 #include <sys/poll.h>
 #include <sys/personality.h>
@@ -121,8 +123,6 @@
 #include <glob.h>
 
 
-/// libtar-dev package on Debian
-#include <libtar.h>
 
 /// libssh2-1-dev package on Debian
 #include <libssh2.h>
@@ -131,15 +131,16 @@
 /// C++ wrapper)
 #include <gmpxx.h>
 
-#define RPS_WITH_FLTK 1
+#define RPS_WITH_FLTK 1 /* could be 1 if using fltk.org graphical toolkit */
 
 //// the generated/rpsdata.h contain only preprocessor #define-s and #undef
-//// it may undef RPS_WITH_FLTK
-//// it is simpler to not use it...
+//// it may undef RPS_WITH_FLTK. It has a pragma message
+//// it is simpler to not use it... (but needed in some files)
 #ifdef RPS_WITH_DATA
 #include "generated/rpsdata.h"
 #endif //RPS_WITH_DATA
 
+extern "C" const char* rps_locale(void);
 
 
 /// keep the debug options in alphabetical order
@@ -191,8 +192,8 @@ typedef Rps_ProtoCallFrame Rps_CallFrame;
 typedef void Rps_EventHandler_sigt(Rps_CallFrame*, int /*fd*/, void* /*data*/);
 
 #if RPS_WITH_FLTK
-extern "C" int rps_fltk_abi_version (void);
-extern "C" int rps_fltk_api_version (void);
+extern "C" int rps_fltk_get_abi_version (void);
+extern "C" int rps_fltk_get_api_version (void);
 extern "C" void rps_fltk_initialize (int argc, char**argv);
 extern "C" void rps_fltk_progoption(char*arg, struct argp_state*, bool side_effect);
 extern "C" bool rps_fltk_enabled (void);
@@ -222,8 +223,8 @@ extern "C" void rps_fltk_remove_output_fd(int fd);
 /* emit the size and align */
 extern "C" void rps_fltk_emit_sizes(std::ostream&out);
 #else /*not RPS_WITH_FLTK*/
-#define rps_fltk_abi_version() 0
-#define rps_fltk_api_version() 0
+#define rps_fltk_get_abi_version() 0
+#define rps_fltk_get_api_version() 0
 #define rps_fltk_initialize() do {}while(0)
 #define rps_fltk_progoption(Arg,State,SidEff) do {}while(0)
 #define rps_fltk_enabled() false
@@ -255,6 +256,8 @@ class Rps_PayloadTasklet;
 class Rps_PayloadUnixProcess;   // transient payload for forked processes
 class Rps_PayloadPopenedFile;   // transient payload for popened command
 class Rps_PayloadCppStream;     // transient payload for C++ streams
+class Rps_PayloadGccJit;  //  payload for libgccjit
+// code generation
 #if RPS_WITH_FLTK
 class Rps_PayloadFltkThing;
 class Rps_PayloadFltkWidget;
@@ -292,24 +295,32 @@ extern "C" std::string rps_test_repl_string;
 extern "C" std::string rps_publisher_url_str;
 extern "C" bool rps_without_quick_tests;
 
+/// Given some SHORTPATH like "foo123.xyz" return a temporary unique
+/// full path in the dump directory which would be renamed at end of
+/// dump to the SHORTPATH...
+extern "C" std::string rps_dumper_temporary_path(Rps_Dumper*du, std::string shortpath);
+
 extern "C" char* rps_run_command_after_load;
 extern "C" char* rps_debugflags_after_load;
+
+extern "C" const char* rps_get_proc_version(void);
 
 extern "C" std::string rps_run_name;
 
 extern "C" std::string rps_stringprintf(const char*fmt, ...)
 __attribute__((format (printf, 1, 2))); // in utilities_rps.cc
 
+
 extern "C" {
 
+#define RPS_USE_CURL 0 // temporary, see https://bugs.gentoo.org/939581 Invalid conversion from int to CURLoption 
 
+#if RPS_USE_CURL
   // https://curl.se/libcurl/ is a web client library
 #include "curl/curl.h"
+#endif /*RPS_USE_CURL*/
 
-  // GNU lightning on https://www.gnu.org/software/lightning/ for
-  // machine code generation
-
-#include "lightning.h"
+// before November 2024 we used GNU lightning from https://www.gnu.org/software/lightning
 
 
 };
@@ -324,7 +335,7 @@ extern "C" {
 
 
 
-// comment for our do-scan-pkgconfig.c utility
+// comment for our do-scan-refpersys-pkgconfig.c utility
 //@@PKGCONFIG jsoncpp
 // JsonCPP https://github.com/open-source-parsers/jsoncpp
 #include "json/json.h"
@@ -349,7 +360,7 @@ extern "C" {
 
 #define RPS_FRIEND_CLASS(Suffix) friend class Rps_##Suffix
 
-// generated in __timestamp.c by do-generate-timestamp.sh utility script
+// generated in __timestamp.c by rps-generate-timestamp.sh utility script
 extern "C" const char rps_timestamp[];
 extern "C" unsigned long rps_timelong;
 extern "C" const char rps_topdirectory[];
@@ -375,7 +386,7 @@ extern "C" const char rps_gpp_preprocessor_version[];
 extern "C" const char rps_ninja_builder[];
 extern "C" const char rps_ninja_version[];
 
-extern "C" const char rps_plugin_builder_script[];
+extern "C" const char rps_plugin_builder[];
 
 /// In commit 92c6e6b70d2 of Feb, 8, 2024 we used to mention GNU bison and GPP
 /// GNU bison is a parser generator, see www.gnu.org/software/bison/
@@ -397,8 +408,6 @@ extern "C" const char rps_building_opersysname[]; /// with only letters, digits,
 extern "C" const char rps_building_machine[];
 extern "C" const char rps_building_machname[]; /// with only letters, digits, underscores
 
-/// the installed path of GNU lightning
-extern "C" const char rps_gnu_lightning_source_dir[];
 /// current utsname
 extern "C" struct utsname rps_utsname;
 
@@ -459,6 +468,8 @@ extern "C" bool rps_run_repl;
 
 
 extern "C" void rps_jsonrpc_initialize(void);
+extern "C" void rps_gccjit_initialize(void);
+extern "C" void rps_gccjit_finalize(void); // passed to atexit(3)
 
 /// Our event loop can call C++ closures before the poll(2) system
 /// call in the event loop. This C++ closure (or std::function) could
@@ -467,6 +478,7 @@ extern "C" void rps_jsonrpc_initialize(void);
 /// the unregistering function.
 extern "C" int rps_register_event_loop_prepoller(std::function<void (struct pollfd*, int& npoll, Rps_CallFrame*)> fun);
 extern "C" void rps_unregister_event_loop_prepoller(int rank);
+extern "C" bool rps_is_active_event_loop(void);
 
 /// register C function input handler
 extern "C" void rps_event_loop_add_input_fd_handler
@@ -565,10 +577,10 @@ extern "C" void rps_fatal_stop_at (const char *, int) __attribute__((noreturn));
               Fil, Lin, __PRETTY_FUNCTION__,                            \
               ##__VA_ARGS__);                                           \
   };                                                                    \
-    if (rps_fltk_enabled())           \
-      rps_fltk_printf_inform_message(Fil, Lin, __PRETTY_FUNCTION__, \
-             rps_incremented_debug_counter(),       \
-             "FATAL:" Fmt, ##__VA_ARGS__);        \
+    if (rps_fltk_enabled())                                             \
+      rps_fltk_printf_inform_message(Fil, Lin, __PRETTY_FUNCTION__,     \
+             rps_incremented_debug_counter(),                           \
+             "FATAL:" Fmt, ##__VA_ARGS__);                              \
   if (rps_debug_file && rps_debug_file != stderr)                       \
     fprintf(rps_debug_file,                                             \
             "\n\n*°* RefPerSys °FATAL° %s:%d:%s " Fmt "*°*\n",          \
@@ -743,11 +755,13 @@ inline std::ostream& operator << (std::ostream&out, const Rps_Status& rst)
 };                              // end operator << for Rps_Status
 
 
+#if RPS_USE_CURL
 //// a function to interact with some web service, usually on
 //// http://refpersys.org/ to transmit information about this
 //// RefPerSys process.. This is related to the --publish-me <URL>
 //// program option in main_rps.cc
-extern "C" void rps_publish_me(const char*url);
+extern "C" void rps_curl_publish_me(const char*url);
+#endif /*RPS_USE_CURL*/
 ///////////////////////////////////////////////////////////////////////////////
 // DEBUGGING MACROS
 // Adapted from MELT Monitor project
@@ -783,6 +797,7 @@ enum rps_progoption_en
   RPSPROGOPT_INTERFACEFIFO='i',
   /// see also github.com/bstarynk/misc-basile/blob/master/mini-edit-JSONRPC.md
   RPSPROGOPT_JOBS='j',
+  RPSPROGOPT_USER_PREFERENCES='U',
   RPSPROGOPT_HOMEDIR=1000,
   RPSPROGOPT_CHDIR_BEFORE_LOAD,
   RPSPROGOPT_CHDIR_AFTER_LOAD,
@@ -790,6 +805,8 @@ enum rps_progoption_en
   RPSPROGOPT_TYPEINFO,
   RPSPROGOPT_SYSLOG,
   RPSPROGOPT_DAEMON,
+  RPSPROGOPT_FULL_GIT,
+  RPSPROGOPT_SHORT_GIT,
   RPSPROGOPT_PID_FILE,
   RPSPROGOPT_NO_TERMINAL,
   RPSPROGOPT_NO_ASLR,
@@ -806,14 +823,20 @@ enum rps_progoption_en
   RPSPROGOPT_RUN_NAME,
   RPSPROGOPT_ECHO,
   RPSPROGOPT_VERSION,
+  RPSPROGOPT_PREFERENCES_HELP,
   RPSPROGOPT_PUBLISH_ME,
 };
 
+extern "C" std::string rps_user_preferences_path(void);
+extern "C" bool rps_want_user_preferences_help(void);
+#define REFPERSYS_DEFAULT_PREFERENCE_PATH ".refpersysrc" /*in $HOME*/
 
 /// if state is RPS_EMPTYSLOT no serious side-effect happens
 extern "C" error_t rps_parse1opt (int key, char *arg, struct argp_state *state);
 extern "C" struct argp_option rps_progoptions[];
 
+/// The program arguments can contain --extra NAME=VALUE
+/// if the NAME is unknown return nullptr...
 extern "C" const char*rps_get_extra_arg(const char*name);
 
 extern "C" void rps_do_create_fifos_from_prefix(void);
@@ -870,7 +893,7 @@ while (0)
       {                                                         \
         std::ostringstream _logstream_##fline;                  \
         _logstream_##fline << logmsg << std::flush;             \
-        rps_debug_printf_at(fname, fline, __FUNCTION__,   \
+        rps_debug_printf_at(fname, fline, __FUNCTION__,         \
           RPS_DEBUG_##dbgopt,                                   \
           "%s",                                                 \
           _logstream_##fline.str().c_str());                    \
@@ -891,8 +914,8 @@ while (0)
       {                                                         \
         std::ostringstream _logstream_##fline;                  \
         _logstream_##fline << logmsg << std::flush;             \
-        rps_debug_printf_at(fname, -fline, __FUNCTION__,  \
-          RPS_DEBUG_##dbgopt,     \
+        rps_debug_printf_at(fname, -fline, __FUNCTION__,        \
+          RPS_DEBUG_##dbgopt,                                   \
                             "%s",                               \
                             _logstream_##fline.str().c_str());  \
       }                                                         \
@@ -1520,12 +1543,14 @@ enum class Rps_Type : std::int16_t
   CallFrame = std::numeric_limits<std::int16_t>::min(),
   ////////////////
   /// payloads are negative, below -1
+  PaylLightCodeGen = -28,
+  PaylMachlearn = -27,
   PaylFltkRefWidget = -26,
   PaylFltkWidget = -25,
   PaylFltkWindow = -24,
   PaylFltkThing = -23,
   PaylCplusplusGen = -22,    // for C++ code generation
-  PaylLightCodeGen = -21,    // for GNU lightning code generation
+  PaylGccjit = -21,    // for GNU libgccjit code generation
   PaylEnviron = -20,         // for environments
   PaylObjMap = -19,          // for object maps
   PaylCppStream = -18,     // for transient C++ streams
@@ -2993,8 +3018,53 @@ public:
   virtual void display(std::ostream&out) const;
 };                                                            // end Rps_StringTokenSource
 
+class Rps_MemoryFileTokenSource;
+extern "C" void rps_parse_user_preferences(Rps_MemoryFileTokenSource*);
+
+/// this is testing if the user preferences has been parsed
+extern "C" bool rps_has_parsed_user_preferences(void);
+
+extern "C" std::string rps_userpref_get_string(const std::string& section, const std::string& name,
+    const std::string& default_value);
+/// C compatible: all arguments are non-null pointers, returns an
+/// strdup-ed string. Sets *pfound iff found the preference
+extern "C" const char*rps_userpref_find_dup_cstring(bool *pfound,
+    const char*csection, const char* cname);
+/// returns the raw preference cstring without duplication or null if
+/// not found. It might not work....
+extern "C" const char*rps_userpref_raw_cstring(const char*csection, const char*cname);
+
+extern "C" long rps_userpref_get_long(const std::string& section, const std::string& name, long default_value);
+/// C compatible: all arguments are non-null pointers, returns a long
+/// preference or else 0. Sets *pfound iff found the preference
+extern "C" long rps_userpref_find_clong(bool *pfound,
+                                        const char*csection, const char* cname);
+
+extern "C" double rps_userpref_get_double(const std::string& section, const std::string& name, double default_value);
+/// C compatible: all arguments are non-null pointers, returns a
+/// double preference or else 0.0. Sets *pfound iff found the preference
+extern "C" double rps_userpref_find_cdouble(bool *pfound,
+    const char*csection, const char* cname);
+
+extern "C" bool rps_userpref_get_bool(const std::string& section, const std::string& name, bool default_value);
+/// C compatible: all arguments are non-null pointers, returns a
+/// boolean preference or else false. Sets *pfound iff found the
+/// preference
+extern "C"  bool rps_userpref_find_cbool(bool *pfound,
+    const char*csection, const char* cname);
+
+extern "C" bool rps_userpref_has_section(const std::string& section);
+extern "C" bool rps_userpref_with_csection(const char*csection);
+
+extern "C" bool rps_userpref_has_value(const std::string& section, const std::string& name);
+extern "C" bool rps_userpref_with_cvalue(const char*csection, const char*cname);
+
+
+
+////////////////
 class Rps_MemoryFileTokenSource : public Rps_TokenSource
 {
+  friend void  rps_parse_user_preferences(Rps_MemoryFileTokenSource*);
   const std::string toksrcmfil_path;
   const char*toksrcmfil_start; // page-aligned, in memory
   const char*toksrcmfil_line;  // pointer to start of current line
@@ -3451,6 +3521,9 @@ public:
 
 //// signature of extern "C" functions for payload loading; their name starts with rpsldpy_
 typedef void rpsldpysig_t(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& hjv, Rps_Id spacid, unsigned lineno);
+//// this signature is also used for "loadrout" JSON members....
+//// see Rps_Loader::parse_json_buffer_second_pass near load_rps.cc:750
+//// after commit b384a473798 (mid-december 2024)
 #define RPS_PAYLOADING_PREFIX "rpsldpy_"
 
 
@@ -5049,10 +5122,12 @@ public:
   static const Rps_SetValue set_of_all_symbols(void);
   static bool forget_name(std::string name);
   static bool forget_object(Rps_ObjectRef obj);
-  // given a C string which looks like a C identifier starting with a letter,
-  // autocomplete that and call a given C++ closure on every possible object ref and name, till that
-  // closure returns true. Return the number of matches, or else 0
-  static int autocomplete_name(const char*prefix, const std::function<bool(const Rps_ObjectZone*,const std::string&)>&stopfun);
+  // given a C string which looks like a C identifier starting with a
+  // letter, autocomplete that string and call a given C++ closure on
+  // every possible object ref and completed name, till that closure
+  // returns true. Return the number of matches, or else 0
+  static int autocomplete_name(const char*prefix,
+                               const std::function<bool(const Rps_ObjectZone*,const std::string&)>&stopfun);
 };                              // end Rps_PayloadSymbol
 
 
@@ -5218,8 +5293,13 @@ public:
 
 #define RPS_MANIFEST_JSON "rps_manifest.json"
 // same as used in rps_manifest.json file
-#define RPS_PREVIOUS_MANIFEST_FORMAT "RefPerSysFormat2019A"
-#define RPS_MANIFEST_FORMAT "RefPerSysFormat2023A"
+#define RPS_PREVIOUS_MANIFEST_FORMAT "RefPerSysFormat2023A"
+
+
+/// the next format should enable computing some data at load time...
+/// using the loadrout JSON member (for loading objects whose content
+/// is operating system or architecture dependent).
+#define RPS_MANIFEST_FORMAT "RefPerSysFormat2024A"
 
 // the user manifest is optional, in the rps_homedir()
 // so using $REFPERSYS_HOME or $HOME
@@ -5272,6 +5352,7 @@ extern "C" unsigned rps_hardcoded_number_of_constants(void);
 //////////////// initial Read-Eval-Print-Loop using GNU readline
 
 extern "C" std::string rps_repl_version(void); // in repl_rps.cc
+
 /// Interpret from either a given input stream,
 /// or using readline if inp is null. In repl_rps.cc
 extern "C" void rps_repl_interpret(Rps_CallFrame*callframe, std::istream*inp, const char*input_name, int& lineno);
@@ -5299,15 +5380,15 @@ extern "C" void rps_garbcoll_application(Rps_GarbageCollector&gc);
 
 ////................................................................
 //// Code generation routines (either C++ files later compiled as a
-//// dlopen-able plugin using the build-plugin.sh script, or in-memory
+//// dlopen-able plugin using the do-build-refpersys-plugin, or in-memory
 //// code generation of using GNU lightning).  Both routines return
 //// true on successful code generation.
 ////................................................................
 
-/// approved on Whatsapp by Abishek Chakravarti on July, 24, 2023
-extern "C" bool rps_generate_lightning_code(Rps_CallFrame*callerframe,
-    Rps_ObjectRef obmodule,
-    Rps_Value genparamv=nullptr);
+/// GNU lightning approved on Whatsapp by Abishek Chakravarti on July,
+/// 24, 2023 but given that it is too difficult to compile we phase
+/// out GNU lightning and will use libgccjit (see gcc.gnu.org/onlinedocs/jit ...) instead.
+/// so no more Rps_generate_lightning_code
 extern "C" bool rps_generate_cplusplus_code(Rps_CallFrame*callerframe,
     Rps_ObjectRef obmodule,
     Rps_Value genparamv=nullptr);
@@ -5419,9 +5500,10 @@ inline std::ostream&operator << (std::ostream&out, const Rps_Cjson_String&hstr)
 };  // end << Rps_Cjson_String
 
 
-/// for output a string quoted like for C
+/// for output a string double-quoted like for C
 class Rps_QuotedC_String : public std::string
 {
+protected:
   bool qtc_empty;
 public:
   Rps_QuotedC_String(const char*str, int len= -1) :
@@ -5454,6 +5536,35 @@ inline std::ostream&operator << (std::ostream&out, const Rps_QuotedC_String&hstr
   hstr.output(out);
   return out;
 };  // end << Rps_QuotedC_String
+
+/// for output a string single-quoted like for the GNU bash shell
+class Rps_SingleQuotedC_String : public Rps_QuotedC_String
+{
+public:
+  Rps_SingleQuotedC_String(const char*str, int len= -1) : Rps_QuotedC_String(str,len) {};
+  Rps_SingleQuotedC_String(const std::string&str)
+    : Rps_QuotedC_String(str) {};
+  Rps_SingleQuotedC_String(const Rps_SingleQuotedC_String&) = default;
+  Rps_SingleQuotedC_String(Rps_SingleQuotedC_String&&) = default;
+  ~Rps_SingleQuotedC_String() = default;
+  void output(std::ostream&out) const
+  {
+    if (qtc_empty)
+      out << "*null*";
+    else
+      {
+        out << "'";
+        rps_output_utf8_cjson(out, c_str(), (int)size());
+        out << "'";
+      }
+  };
+};        // end class Rps_SingleQuotedC_String
+
+inline std::ostream&operator << (std::ostream&out, const Rps_SingleQuotedC_String&hstr)
+{
+  hstr.output(out);
+  return out;
+};  // end << Rps_SingleQuotedC_String
 
 //////////////////////////////////////////////////////////////////
 /// initial agenda machinery;

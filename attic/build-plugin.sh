@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/dash
 # file build-plugin.sh in RefPerSys - see http://refpersys.org/
 # Author(s):
 #      Basile Starynkevitch <basile@starynkevitch.net>
@@ -41,7 +41,7 @@
 ## code comments....
 
 ## same as MY_HEAD_LINES_THRESHOLD in do-scan-pkgconfig.c
-MY_HEAD_LINES_THRESHOLD=384
+MY_HEAD_LINES_THRESHOLD=512
 
 if [ "$1" = '--help' ]; then
     echo $0 usage to compile a RefPerSys plugin C++ code on Linux:
@@ -52,6 +52,8 @@ if [ "$1" = '--help' ]; then
     /bin/head -20 plugins_dir/rpsplug_createclass.cc
     exit
 fi
+
+/usr/bin/logger -i -s --id=$$ --tag refpersys-build-plugin  --priority user.info "$0" "$@"
 
 cppfile=$1
 pluginfile=$2
@@ -70,7 +72,7 @@ fi
 
 /usr/bin/logger --id=$$ -s  -t "$0:" "starting" cppfile= $1 pluginfile= $2 curdate= $curdate REFPERSYS_TOPDIR= $REFPERSYS_TOPDIR cwd $(/bin/pwd)
 
-eval $(/usr/bin/gmake print-plugin-settings)
+eval $(/usr/bin/make print-plugin-settings)
 
 ### plugincppflags contain compiler flags
 ### pluginlinkerflags contain linker flags

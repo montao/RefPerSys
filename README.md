@@ -1,25 +1,34 @@
-# RefPerSys
+# RefPerSys inference engine
 
 
 This [free software](https://en.wikipedia.org/wiki/Free_software)
-project has its source code on https://gitlab.com/bstarynk/refpersys/
-and on https://github.com/RefPerSys/RefPerSys . It is its own web site
-on http://refpersys.org/ where more details are given.
+project has its source code on https://github.com/RefPerSys/RefPerSys
+with an obsolete variant on https://gitlab.com/bstarynk/refpersys/
+which is not maintained in 2024. It is its own web site on
+http://refpersys.org/ where more details are given.
 
 *RefPerSys* is aiming to become a free software symbolic artificial
 intelligence system or [inference
-engine](https://en.wikipedia.org/wiki/Inference_engine), e.g. an
+engine](https://en.wikipedia.org/wiki/Inference_engine), e.g. a better
 alternative to [CLIPSrules](https://clipsrules.net/).
 
-Contributions to *RefPerSys* are welcome. Contact by email [Basile
-Starynkevitch](http://starynkevitch.net/Basile/) (near Paris, France)
-at `basile@starynkevitch.net` or Abhishek Chakravarti (Kolkata,
-India) at `chakravarti.avishek@gmail.com`. Basile can also be contacted
-by snail mail (8 rue de la Faïencerie, 92340 Bourg-la-Reine, France).
+Contributions to *RefPerSys* are welcome. Contact by email
+[Basile STARYNKEVITCH](http://starynkevitch.net/Basile/) (near Paris, France)
+at `basile@starynkevitch.net` and `b.starynkevitch@gmail.com`
+or Abhishek Chakravarti (Kolkata, India) at `chakravarti.avishek@gmail.com`.
+Basile can also be contacted
+by snail mail (8 rue de la Faïencerie, 92340 Bourg-la-Reine, France)
+or (on French office hours) by Whatapp to +33 6 8501 followed by
+the four digits product of seven and 337.
+
+There used to have several variants of [RefPerSys](http://refpersys.org/).
+But unless we get help (including funding) and contributors we focus on [RefPerSys in C++](https://github.com/RefPerSys/RefPerSys/)
+since commit 559ea329f46a (2024, Nov, 20).
 
 [HorizonEurope](https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/programmes/horizon)
 or [ITEA](https://itea4.org/) consortia interested by
-[RefPerSys](http://refpersys.org/) are welcome to contact us.
+[RefPerSys](http://refpersys.org/) are welcome to contact us. Likewise for students or academics or passionate open source developers 
+wanting to contribute.
 
 ## A research project
 
@@ -47,12 +56,62 @@ We absolutely want to avoid any
 Don't expect anything useful from RefPerSys before at least 2024. But
 you could have fun sharing our ideas and experimenting yours.
 
-A rewrite of RefPerSys in C was attempted on [refpersys-in-c](https://github.com/RefPerSys/refpersys-in-c).
+A rewrite of RefPerSys in C was attempted on [refpersys-in-c](https://github.com/RefPerSys/refpersys-in-c) but is abandonned 
+in commit 559ea329f46a28 (nov. 2024).
 
 We considered previously to use the garbage collector from [Ravenbrook
 MPS](https://github.com/Ravenbrook/mps).
 
-**Don't expect RefPerSys to be a mature project.** It is not in June 2024.
+**Don't expect RefPerSys to be a mature project.** It is not in October 2024.
+
+## environment variables
+
+Your `$EDITOR` should give a valid editor path (e.g. `/usr/bin/emacsclient` or `/usr/bin/gedit` or `/usr/bin/vim` ...)
+
+Your `$HOME` should be valid.
+
+Your `$PATH` should be valid and give access to your `refpersys` and
+(when relevant) `lto-refpersys` executables. A possibility could be to
+have (or create) your `$HOME/bin/` directory (appearing in your
+`$PATH`) and symbolic links inside it. Your `$PATH` should give access
+to [GNU make](https://www.gnu.org/software/make/) as `make` (a simpler
+make utility, including BSD make, is not ok). the
+[`git`](http://git-scm.com/) version control command should be
+accessible and likewise for other [GNU](https://www.gnu.org/software/)
+utilities.
+
+
+Conventionally any *RefPerSys* specific environment variable (outside
+of the usual environment variables mentioned above) is starting with
+`REFPERSYS_` .... Some of them are set by the `refpersys` executable before forking any command:
+
+
+**The `$REFPERSYS_TOPDIR` should contain the path of the RefPerSys
+source directory**. So if you did some command like `git clone
+https://github.com/RefPerSys/RefPerSys` in your `$HOME/work/`
+directory you need to `export REFPERSYS_TOPDIR=$HOME/work/RefPerSys`
+(probably in some of your ̀`$HOME/.bashrc` or `$HOME/.zshrc` or
+`$HOME/.zshenv` shell files) ...
+
+### internally set environment variables.
+
+When the `refpersys` executable is forking a process or running a
+command, the following environment variables have been set (by its
+`rps_extend_env` C++ function):
+
+* `REFPERSYS_TOPDIR` to the top directory e.g. `$HOME/work/RefPerSys`
+* `REFPERSYS_RUN_NAME` to the run name (if given with `--run-name=NAME`)
+* `REFPERSYS_GITID` to the complete git id
+  (e.g. `d65f8c47aed61d31454b3612a33a30a308660d31+`).<br/>
+  The suffix `+` indicates that your *RefPerSys source code*
+  has been *modified locally*
+  and is newer that what you are reading on this
+  https://github.com/RefPerSys/RefPerSys webpage.
+* `REFPERSYS_PID` to the process id e.g. `1653963`
+* `REFPERSYS_SHORTGITID` to a shortened git id e.g. `d65f8c47aed6+`
+
+
+## design ideas
 
 Some draft design ideas are written in the [RefPerSys design
 draft](http://starynkevitch.net/Basile/refpersys-design.pdf) which is
@@ -66,8 +125,7 @@ intelligence](https://en.wikipedia.org/wiki/Artificial_intelligence)
 goals) and [open source](https://en.wikipedia.org/wiki/Open_source)
 please mention them to [Basile
 Starynkevitch](http://starynkevitch.net/Basile/) (France) by email to
-`basile@starynkevitch.net` (personal email) or
-`basile.starynkevitch@cea.fr` (professional email).
+`basile@starynkevitch.net` (personal email) or by snail mail, e.g. postcards are also welcome.
 
 ## persistent values
 
@@ -114,6 +172,10 @@ attributes) so used for [dynamic message
 dispatching](https://en.wikipedia.org/wiki/Dynamic_dispatch).
 
 
+## Code representation and generation
+
+See separate [CODE-REPR.md](CODE-REPR.md) markup file.
+
 ## Worker threads and agenda of tasklets
 
 *RefPerSys* will have a small *fixed* set of worker threads (perhaps a
@@ -136,14 +198,14 @@ copyrighted by the RefPerSys team, currently made of:
 
  *      Basile Starynkevitch <basile@starynkevitch.net>,
         8 rue de la Faïencerie
-	92340 Bourg-la-Reine
-	France
+        92340 Bourg-la-Reine
+        France
         homepage http://starynkevitch.net/Basile/
-		near Paris, France. So usual timezone `TZ=MEST`
-		
+                near Paris, France. So usual timezone `TZ=MEST`
+
  *      Abhishek Chakravarti <ack@fifthestate.co.in>
         Kolkata, India
-	
+
  *      Nimesh Neema <nimeshneema@gmail.com>
  
  *      Niklas Rozencrantz in Stockholm, Sweden.
@@ -157,7 +219,7 @@ and could retain their original copyright owner.
 Please ask, by email, the above RefPerSys team for C++ coding
 conventions before starting non-trivial contributions to the C++
 runtime of RefPerSys.  If you are contributing to its C++ runtime,
-please **run `make clean` after any `git pull`**.
+please **run `make clean` after any `git pull`**. You generally should run `make config` 
 
 The GPLv3+ license of RefPerSys is unlikely to change before 2025 (and
 probably even after).
@@ -168,7 +230,7 @@ RefPerSys could be patched and extended to generate proprietary code
 or data. In 2023 some authors (including Basile Starynkevitch) are not
 interested to add such a features. Others authors (in India) are
 interested to add that. Their contributions are pending (in
-sept. 2023).
+october 2024).
 
 ## File conventions
 
@@ -180,8 +242,8 @@ just want our runtime to work, not to serve as an example of well
 written C++17 code.
 
 The prefered C++ compiler (in 2023Q2) for *RefPerSys* is
-[GCC](http://gcc.gnu.org/) version [12](https://gcc.gnu.org/gcc-12/) or
-[13](https://gcc.gnu.org/gcc-13).
+[GCC](http://gcc.gnu.org/) version [13](https://gcc.gnu.org/gcc-13/) or
+(preferably in 2024Q3) [14](https://gcc.gnu.org/gcc-14).
 
 It could be worthwhile to sometimes compile *RefPerSys* with `clang++`
 (see http://clang.llvm.org/ for more). In practice `make clean` then
@@ -219,7 +281,13 @@ hand-written C++ source files to emit `generated/rps-constants.hh`
 hope to generate most of its C++ source code (under `generated/`
 subdirectory), and explicitly represent the generated code as objects.
 
-A *plugin* is some [shared object](https://en.wikipedia.org/wiki/Library_(computing)#Shared_libraries) (some `*.so` file) loaded by [dlopen(3)](https://man7.org/linux/man-pages/man3/dlopen.3.html).
+A *plugin* is some [shared object](https://en.wikipedia.org/wiki/Library_(computing)#Shared_libraries) 
+(some `*.so` [ELF](https://wiki.osdev.org/ELF) file) loaded by 
+[dlopen(3)](https://man7.org/linux/man-pages/man3/dlopen.3.html). 
+The C++ code of a plugin is hand-written, with the hope of needing less and less of them 
+(and have them replaced by automatically generated module code). We don't bother
+[dlclose(3)](https://man7.org/linux/man-pages/man3/dlclose.3.html)-ing plugins.
+
 
 A binary *module* is a shared object whose C++ code is generated by
 [RefPerSys](http://refpersys.org/) at dump time. The generated C++
@@ -229,7 +297,7 @@ conventionally named `generated/_`*objid*`.cc`
 Binary modules are conventionally named `generated/__rps_*.so`, see in
 our `GNUmakefile` the line around comment `**generated binary modules`
 
-See our shell script `build-plugin.sh` to understand compiling
+See our C++ utility `do-build-refpersys-plugin.cc` to understand compiling
 conventions in binary modules or plugins. In particular, if the first
 fifty (50) lines of a generated C++ file contain - probably inside a
 comment - @RPSCOMPILEFLAGS= that is used to compile the plugin. If
@@ -291,20 +359,17 @@ See also some files from [misc-basile](https://github.com/bstarynk/misc-basile)
 You need a recent C99 compiler e.g. `gcc` (at least  [GCC
 12](https://gcc.gnu.org/gcc-12/)). Check with `gcc --version`.
 
-You need a recent C++17 compiler such as `g++` (We use
-[GCC](http://gcc.gnu.org/) version [GCC
-12](https://gcc.gnu.org/gcc-12/)) or [GCC
-13](https://gcc.gnu.org/gcc-13/) or [GCC
-14](https://gcc.gnu.org/gcc-14/)
-[`clang++`](http://clang.llvm.org/) version [Clang
-11](https://releases.llvm.org/download.html). Look into, and perhaps
-improve, our `GNUmakefile`. Check with `g++ --version`. Build using `make -j 3` or more.
+You need a recent C++17 compiler such as `g++` (We use 
+[GCC 13](https://gcc.gnu.org/gcc-13/) or [GCC 14](https://gcc.gnu.org/gcc-14/)
+and sometimes [`clang++`](http://clang.llvm.org/) whose warnings are different. 
+Look into, and perhaps improve, our `GNUmakefile`. Check with `g++ --version`. Build using `make -j 3` or more.
  
-You need the [ninja](https://ninja-build.org/) build utility.
+You may need the [ninja](https://ninja-build.org/) build utility; in commit 559ea329f46a and before 
+it is used by our `do-refpersys-build-plugin` utility.
 
 You need the `glibmm` from GTK suite. And some `gtkmm` for some RefPerSys plugins.
 
-You also should do a  `make clean` after any `git pull`
+You also should do a  `make clean` after any `git pull` and often redo a `make config`...
 
 
 Your Unix environment should contain a `REFPERSYS_TOPDIR` shell
@@ -382,6 +447,7 @@ than MPS), with the following ideas:
   code when the caller frame argument of invocation of C++ macro
   `RPS_LOCALFRAME` is statically null, and
   `RPS_CALL_FRAME_UNDESCRIBED` when its descriptor is not given.
+  
 
 * our garbage collector manages *memory zones* inside a set of
   `mmap`-ed *memory blocks* : either small blocks of a megaword that
@@ -405,7 +471,8 @@ than MPS), with the following ideas:
   functions](https://en.wikipedia.org/wiki/Mutator_method)) can avoid
   getting that local frame pointer.
   
-* The C++ runtime, and any code generated in RefPerSys, should
+* The C++ runtime and plugins, and any code  generated in RefPerSys (i.e. modules)
+or with [libgccjit](https://gcc.gnu.org/onlinedocs/jit/), should
 *explicitly* be in [A-normal
 form](https://en.wikipedia.org/wiki/A-normal_form). So coding `z =
 f(g(x),y)` is forbidden in C++ (where `f` and `g` are C++ functions
@@ -474,7 +541,8 @@ old paper, then read the [GC handbook](http://gchandbook.org/)
 We already need the following libraries:
 
 * [libunistring](https://www.gnu.org/software/libunistring/) for [UTF-8](https://en.wikipedia.org/wiki/UTF-8) support, since [UTF-8 is everywhere](http://utf8everywhere.org/)
-* [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) for [backtraces](https://en.wikipedia.org/wiki/Stack_trace)
+* [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) for [backtraces](https://en.wikipedia.org/wiki/Stack_trace) is essential. We hope to have rules mentioning and querying the call stack.
+* [libgccjit](https://gcc.gnu.org/onlinedocs/jit/) for code generation.
 
 We may want to use, either soon or within a few years, (usually after 2022) interesting C or C++ libraries such as:
 

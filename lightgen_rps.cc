@@ -30,8 +30,11 @@
  *    You should have received a copy of the GNU General Public License
  *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Notice:
- *    See also companion file cppgen_rps.cc for C++ code generation.
+ * Notice: See also companion file cppgen_rps.cc for C++ code
+ *    generation and gccjit_rps.cc for GCC libgccjit based one.
+ *
+ * See
+ *    https://lists.gnu.org/archive/html/lightning/2024-09/msg00010.html
  ************************************************************************/
 
 #include "refpersys.hh"
@@ -44,7 +47,9 @@
 
 
 /// GNU lightning
+extern "C" {
 #include "lightning.h"
+};
 
 extern "C" const char rps_lightgen_gitid[];
 const char rps_lightgen_gitid[]= RPS_GITID;
@@ -65,10 +70,18 @@ const char rps_lightgen_shortgitid[]= RPS_SHORTGITID;
 /// temporary payload for GNU lightning code generation:
 class Rps_PayloadLightningCodeGen : public Rps_Payload
 {
+public:
+  typedef long lightnodenum_t;
   friend Rps_PayloadLightningCodeGen*
   Rps_QuasiZone::rps_allocate1<Rps_PayloadLightningCodeGen,Rps_ObjectZone*>(Rps_ObjectZone*);
   virtual ~Rps_PayloadLightningCodeGen();
   jit_state_t* lightg_jist;
+  std::map<jit_node*,lightnodenum_t> lightg_nod2num_map;
+  std::map<lightnodenum_t,jit_node*> lightg_num2nod_map;
+#define _jit this->lightg_jist
+#define RPSJITLIGHTPAYLOAD_LOCKGUARD_AT(Lin) \
+  std::lock_guard<std::recursive_mutex> gu##Lin(*(this->owner()->objmtxptr()));
+#define RPSJITLIGHTPAYLOAD_LOCKGUARD() RPSJITLIGHTPAYLOAD_LOCKGUARD_AT(__LINE__)
 protected:
   virtual void gc_mark(Rps_GarbageCollector&gc) const;
   virtual void dump_scan(Rps_Dumper*du) const;
@@ -88,17 +101,94 @@ protected:
   {
     return false;
   };
+public:
+  void rpsjit_prolog(void)
+  {
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    jit_prolog();
+  };
+  void rpsjit_epilog(void)
+  {
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    jit_epilog();
+  };
+  void rpsjit_realize(void)
+  {
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    jit_realize();
+  };
+  lightnodenum_t rpsjit_register_node(jit_node_t  *jn)
+  {
+    lightnodenum_t num=0;
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    RPS_ASSERT(jn != nullptr);
+    size_t nbnod = lightg_nod2num_map.size();
+    RPS_ASSERT(nbnod == lightg_num2nod_map.size());
+    auto numit = lightg_nod2num_map.find(jn);
+    if (numit != lightg_nod2num_map.end())
+      {
+        num = numit->second;
+        RPS_ASSERT(num>0);
+        RPS_ASSERT(lightg_num2nod_map.find(num) != lightg_num2nod_map.end());
+        return num;
+      };
+    num = (lightnodenum_t)(nbnod+1);
+    lightg_nod2num_map.insert({jn,num});
+    lightg_num2nod_map.insert({num,jn});
+    return num;
+  };// end member function rpsjit_register_node
+  jit_node_t* rpsjit_node_of_num(lightnodenum_t num) const
+  {
+    if (num==0)
+      return nullptr;
+    jit_node_t* nd=nullptr;
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    auto numit = lightg_num2nod_map.find(num);
+    if (numit != lightg_num2nod_map.end())
+      {
+        nd = numit->second;
+        RPS_ASSERT(lightg_nod2num_map.find(nd) != lightg_nod2num_map.end());
+      }
+    return nd;
+  };            // end rpsjit_node_of_num
+  lightnodenum_t rpsjit_num_of_node(jit_node_t* nd) const
+  {
+    if (nd == nullptr)
+      return 0;
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    lightnodenum_t num=0;;
+    auto nodit = lightg_nod2num_map.find(nd);
+    if (nodit != lightg_nod2num_map.end())
+      {
+        num = nodit->second;
+        RPS_ASSERT(lightg_num2nod_map.find(num) != lightg_num2nod_map.end());
+      }
+    return num;
+  };
 };        // end class Rps_PayloadLightningCodeGen
 
 Rps_PayloadLightningCodeGen::Rps_PayloadLightningCodeGen(Rps_ObjectZone*owner)
-  : Rps_Payload(Rps_Type::PaylLightCodeGen,owner), lightg_jist(nullptr)
+  : Rps_Payload(Rps_Type::PaylLightCodeGen,owner), lightg_jist(nullptr),
+    lightg_nod2num_map(), lightg_num2nod_map()
 {
   lightg_jist = jit_new_state();
+  RPSJITLIGHTPAYLOAD_LOCKGUARD();
 } // end of Rps_PayloadLightningCodeGen::Rps_PayloadLightningCodeGen
 
 Rps_PayloadLightningCodeGen::~Rps_PayloadLightningCodeGen()
 {
-  _jit_destroy_state(lightg_jist);
+  RPSJITLIGHTPAYLOAD_LOCKGUARD();
+  for (auto itnod: lightg_nod2num_map)
+    {
+      jit_node_t*curnod = itnod.first;
+      lightnodenum_t curnum= itnod.second;
+      RPS_ASSERT(curnod != nullptr);
+      RPS_ASSERT(curnum > 0);
+      RPS_ASSERT(lightg_num2nod_map.find(curnum) != lightg_num2nod_map.end());
+    };
+  lightg_nod2num_map.clear();
+  lightg_num2nod_map.clear();
+  _jit_destroy_state(lightg_jist); /// all nodes get destroyed!
   lightg_jist = nullptr;
 } // end destructor Rps_PayloadLightningCodeGen::~Rps_PayloadLightningCodeGen
 
@@ -121,7 +211,9 @@ Rps_PayloadLightningCodeGen::dump_json_content(Rps_Dumper*du, Json::Value&jv) co
   RPS_POSSIBLE_BREAKPOINT();
 } // end Rps_PayloadLightningCodeGen::dump_json_content
 
-//// return true on successful code generation
+
+////////////////////////////////////////////////////////////////
+//// Returns true on successful code generation
 bool
 rps_generate_lightning_code(Rps_CallFrame*callerframe,
                             Rps_ObjectRef argobmodule,
@@ -134,7 +226,15 @@ rps_generate_lightning_code(Rps_CallFrame*callerframe,
                  Rps_ObjectRef obmodule;
                  Rps_ObjectRef obgenerator;
                  Rps_Value genparamv;
+                 Rps_Value elemv;
+                 Rps_Value mainv;
+                 Rps_Value xtrav;
+
                 );
+  _.set_additional_gc_marker([&](Rps_GarbageCollector*gc)
+  {
+#warning probably needs more GC-ed data in rps_generate_lightning_code
+  });
   _f.obmodule = argobmodule;
   _f.genparamv = arggenparam;
   std::lock_guard<std::recursive_mutex> gumodule(*_f.obmodule->objmtxptr());
@@ -143,13 +243,82 @@ rps_generate_lightning_code(Rps_CallFrame*callerframe,
                                RPS_ROOT_OB(_6SM7PykipQW01HVClH) //midend_lightning_code_generator∈class
                               );
   std::lock_guard<std::recursive_mutex> gugenerator(*_f.obgenerator->objmtxptr());
-  _f.obgenerator->put_new_plain_payload<Rps_PayloadLightningCodeGen>();
+  Rps_PayloadLightningCodeGen*paylgen =
+    _f.obgenerator->put_new_plain_payload<Rps_PayloadLightningCodeGen>();
+  RPS_ASSERT(paylgen != nullptr);
   _f.obgenerator->put_attr(RPS_ROOT_OB(_2Xfl3YNgZg900K6zdC), //"code_module"∈named_attribute
                            _f.obmodule);
+  ///TODO: perhaps a better attribute is needed
+  _f.obgenerator->put_attr(RPS_ROOT_OB(_5VC4IuJ0dyr01b8lA0), //generate_code∈named_selector
+                           _f.genparamv);
   RPS_DEBUG_LOG (CODEGEN, "GNU lightning generator " << _f.obgenerator
-                 << " for module " << _f.obmodule);
-  RPS_FATALOUT("unimplemented rps_generate_lightning_code obmodule="
-               << _f.obmodule << " _f.obgenerator=" << _f.obgenerator);
+                 << " for module " << _f.obmodule
+                 << " generation params " << _f.genparamv << std::endl
+                 << " thread=" << rps_current_pthread_name());
+  /// iterate on every component of the module
+  int mix = -1;
+  for (mix = 0; (unsigned)mix < _f.obmodule->nb_components(&_); mix++)
+    {
+      _f.mainv = nullptr;
+      _f.xtrav = nullptr;
+      _f.elemv = _f.obmodule->component_at(&_, mix);
+      if (!_f.elemv)
+        continue;
+      RPS_DEBUG_LOG (CODEGEN, "GNU lightning generator " << _f.obgenerator
+                     << " elemv=" << _f.elemv
+                     << " mix#" << mix
+                     << " for module " << _f.obmodule
+                     << " generation params " << _f.genparamv << std::endl
+                     << " thread=" << rps_current_pthread_name());
+      if (_f.elemv.is_closure())
+        {
+          // if the element is a closure, we apply it, and that could
+          // add more elements to the module...
+          Rps_TwoValues apres =
+            Rps_ClosureValue(_f.elemv).apply4(&_,
+                                              _f.obgenerator,
+                                              _f.genparamv,
+                                              _f.obmodule,
+                                              Rps_Value::make_tagged_int(mix));
+          /// make the GC happy
+          _f.mainv = apres.main();
+          _f.xtrav = apres.xtra();
+          if (!_f.mainv && !_f.xtrav)
+            RPS_WARNOUT("rps_generate_lightning_code failed to apply element#" << mix
+                        << "=" << _f.elemv
+                        << " to generator " << _f.obgenerator
+                        << " with parameters " << _f.genparamv
+                        << " of module " << _f.obmodule);
+          continue; /// the for loop in the module
+        }
+      else
+        {
+          Rps_TwoValues snres =
+            _f.elemv.send4(&_,
+                           //lightning_generate_code∈named_selector:
+                           RPS_ROOT_OB(_6GiKCsHJDCi04m74XV),
+                           _f.obgenerator,
+                           _f.genparamv,
+                           _f.obmodule,
+                           Rps_Value::make_tagged_int(mix));
+          _f.mainv = snres.main();
+          _f.xtrav = snres.xtra();
+          if (!_f.mainv && !_f.xtrav)
+            RPS_WARNOUT("rps_generate_lightning_code failed to send"
+                        " lightning_generate_code to element#" << mix
+                        << "=" << _f.elemv
+                        << " and generator " << _f.obgenerator
+                        << " with parameters " << _f.genparamv
+                        << " of module " << _f.obmodule);
+
+        };
+    };
+  RPS_WARNOUT("unimplemented rps_generate_lightning_code obmodule="
+              << _f.obmodule << " obgenerator=" << _f.obgenerator
+              << " genparamv=" << _f.genparamv << std::endl
+              << " thread=" << rps_current_pthread_name()
+              << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rps_generate_lightning_code/end-incomplete"));
 #warning unimplemented rps_generate_lightning_code
 } // end rps_generate_lightning_code
 
