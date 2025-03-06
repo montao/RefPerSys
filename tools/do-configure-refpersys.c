@@ -4,7 +4,7 @@
 /// Description:
 ///     This file is part of the Reflective Persistent System.
 
-///      © Copyright 2024 The Reflective Persistent System Team
+///      © Copyright 2024 - 2025 The Reflective Persistent System Team
 ///      team@refpersys.org & http://refpersys.org/
 ///
 /// Purpose: build-time configuration of the RefPerSys inference
@@ -58,6 +58,10 @@ WINDOW *rpsconf_ncurses_window;
 #include "readline/readline.h"
 #endif /*RPSCONF_WITHOUT_READLINE */
 
+#ifndef RPSCONF_WITHOUT_GCCJIT
+#include <libgccjit.h>
+#endif /*RPSCONF_WITHOUT_GCCJIT */
+
 #ifndef RPSCONF_MAX_PROG_ARGS
 #define RPSCONF_MAX_PROG_ARGS 1024
 #endif /* RPSCONF_MAX_PROG_ARGS */
@@ -83,7 +87,7 @@ WINDOW *rpsconf_ncurses_window;
 #endif
 
 #ifndef RPSCONF_HOST
-// possible HOST might be "refpersys.com" given by /bin/hostname -f
+// fictional HOST might be "refpersys.com" given by /bin/hostname -f
 #error HOST should be defined thru compilation command "hostname"
 #endif
 
@@ -98,6 +102,11 @@ const char rpsconf_host[] = RPSCONF_HOST;
 const char *rpsconf_prog_name;
 bool rpsconf_verbose = 1; /* will be set later with command line flag */
 bool rpsconf_failed;
+
+#ifndef RPSCONF_WITHOUT_GCCJIT
+gcc_jit_context *rpsconf_gccjit_ctxt;
+gcc_jit_result *rpsconf_gccjit_result;
+#endif /*RPSCONF_WITHOUT_GCCJIT */
 
 //// working directory
 char rpsconf_cwd_buf[RPSCONF_PATH_MAXLEN];
@@ -133,12 +142,6 @@ const char *rpsconf_fltk_config;
 
 
 
-
-/* absolute path to Miller&Auroux Generic preprocessor */
-const char *rpsconf_gpp;
-
-/* absolute path to ninja builder (see ninja-build.org) */
-const char *rpsconf_ninja_builder;
 
 #ifndef MAX_REMOVED_FILES
 #define MAX_REMOVED_FILES 4096
@@ -182,11 +185,87 @@ void rpsconf_should_remove_file (const char *path, int lineno);
 #define RPSCONF_DIAG(msg, ...)         \
   rpsconf_diag__(__FILE__, __LINE__, msg, ##__VA_ARGS__)
 
+/*
+ * Interface for rpsconf_trash
+ */
+struct rpsconf_trash
+{
+  const char *pathv_[4096];
+  int pathc_;
+  char state_;
+};
+
+static struct rpsconf_trash *rpsconf_trash_get_ (void);
+static void rpsconf_trash_push_ (const char *, int);
+static void rpsconf_trash_exit (void);
+#define rpsconf_trash_push(path) rpsconf_trash_push_((path), __LINE__)
+
+struct rpsconf_trash *rpsconf_trash_get_ (void)
+{
+  static struct rpsconf_trash ctx;
+  static bool init = false;
+
+  if (!init)
+    {
+      ctx.pathc_ = 0;
+      ctx.state_ = EXIT_SUCCESS;
+      memset (ctx.pathv_, 0, sizeof (ctx.pathv_));
+      init = true;
+    }
+
+  return &ctx;
+}
+
+void
+rpsconf_trash_push_ (const char *path, int line)
+{
+  struct rpsconf_trash *ctx;
+
+  assert (path != NULL && *path != '\0');
+  if (access (path, F_OK) == -1)
+    return;
+
+  ctx = rpsconf_trash_get_ ();
+  if (ctx->pathc_ > (int) sizeof (ctx->pathv_))
+    {
+      fprintf (stderr, "%s: %s: too many files to remove [%s:%d]\n",
+               rpsconf_prog_name, path, __FILE__, line);
+      ctx->state_ = EXIT_FAILURE;
+      exit (ctx->state_);
+    }
+
+  ctx->pathv_[ctx->pathc_++] = path;
+}
+
+void
+rpsconf_trash_exit (void)
+{
+  struct rpsconf_trash *ctx;
+  int i;
+
+  ctx = rpsconf_trash_get_ ();
+  if (ctx->state_ == EXIT_FAILURE)
+    {
+      fprintf (stderr,
+               "%s: exit failure: not removing %d files [%s:%d]\n",
+               rpsconf_prog_name, ctx->pathc_, __FILE__, __LINE__ - 2);
+      return;
+    }
+
+  fprintf (stderr, "%s: removing %d files at exit [%s:%d]\n",
+           rpsconf_prog_name, ctx->pathc_, __FILE__, __LINE__ - 2);
+
+  for (i = 0; i < ctx->pathc_; i++)
+    unlink (ctx->pathv_[i]);
+}
+
+/* End rpsconf_trash interface */
 
 
 /// return a malloced path to a temporary textual file
-char *rpsconf_temporary_textual_file (const char *prefix,
-                                      const char *suffix, int lineno)
+char *
+rpsconf_temporary_textual_file (const char *prefix,
+                                const char *suffix, int lineno)
 {
   char buf[256];
   memset (buf, 0, sizeof (buf));
@@ -213,9 +292,9 @@ char *rpsconf_temporary_textual_file (const char *prefix,
   res = strdup (buf);
   if (!res)
     {
-      fprintf (stderr,
-               "%s failed to strdup temporay file path %s from %s:%d (%m)\n",
-               rpsconf_prog_name, buf, __FILE__, lineno);
+      fprintf (stderr, "%s failed to strdup temporary file path %s" //
+               " from %s:%d (%s)\n",
+               rpsconf_prog_name, buf, __FILE__, lineno, strerror (errno));
       rpsconf_failed = true;
       exit (EXIT_FAILURE);
     };
@@ -430,7 +509,6 @@ rpsconf_should_remove_file (const char *path, int lineno)
     }
   rpsconf_files_to_remove_at_exit[rpsconf_removed_files_count++] = path;
 }       /* end rpsconf_should_remove_file */
-
 
 
 void
@@ -665,6 +743,8 @@ rpsconf_try_then_set_cxx_compiler (const char *cxx)
   rpsconf_cpp_compiler = cxx;
 }       /* end rpsconf_try_then_set_cxx_compiler */
 
+
+#ifndef RPSCONF_WITHOUT_GCCJIT
 void
 rpsconf_check_libgccjit_header (const char *jithpath)
 {
@@ -714,54 +794,8 @@ rpsconf_check_libgccjit_header (const char *jithpath)
   fclose (jithf);
 }       /* end rpsconf_check_libgccjit_header */
 
-void
-rpsconf_check_libgccjitplusplus_header (const char *jitpppath)
-{
-  FILE *jithf = fopen (jitpppath, "r");
-  if (!jithf)
-    {
-      fprintf (stderr,
-               "%s fail to fopen '%s' [%s:%d]\n",
-               rpsconf_prog_name, jitpppath, __FILE__, __LINE__ - 2);
-      rpsconf_failed = true;
-      exit (EXIT_FAILURE);
-    };
-  /**
-     the libgccjit++.h file is expected to contain the following sentences:
-     a C++ API for libgccjit
-     This file is part of GCC
-  **/
-  bool gotcplusplusapi = false;
-  bool gotpartofgcc = false;
-  for (int lc = 0; lc < 20; lc++)
-    {
-      char linbuf[128];
-      memset (linbuf, 0, sizeof (linbuf));
-      if (!fgets (linbuf, sizeof (linbuf), jithf))
-        {
-          fprintf (stderr, "%s: failed to get line#%d from %s (%s) [%s:%d]\n",
-                   rpsconf_prog_name, lc + 1, jitpppath, strerror (errno),
-                   __FILE__, __LINE__);
-          rpsconf_failed = true;
-          exit (EXIT_FAILURE);
-        };
-      if (strstr (linbuf, "C++") && strstr (linbuf, "API")
-          && strstr (linbuf, "libgccjit"))
-        gotcplusplusapi = true;
-      else if (strstr (linbuf, "file") && strstr (linbuf, "part")
-               && strstr (linbuf, "of") && strstr (linbuf, "GCC"))
-        gotpartofgcc = true;
-    };
-  if (!gotcplusplusapi || !gotpartofgcc)
-    {
-      fprintf (stderr,
-               "%s: the GCC header %s is not the expected GCCJIT file\n",
-               rpsconf_prog_name, jitpppath);
-      rpsconf_failed = true;
-      exit (EXIT_FAILURE);
-    };
-  fclose (jithf);
-}       /* end rpsconf_check_libgccjitplusplus_header */
+/// libgccjit++ is obsolete in 2025
+/// see https://gcc.gnu.org/pipermail/jit/2024q4/001955.html
 
 typedef void rpsconf_voidfun_t (void);
 typedef const char *rpsconf_strfun_t (void);
@@ -771,13 +805,18 @@ rpsconf_test_libgccjit_compilation (const char *cc)
 {
   /* See the do-test-libgccjit.c file, which is doing some libgccjit
      things. We first compile that file as a plugin. */
-  char cmdbuf[256];
+  char cmdbuf[384];
   memset (cmdbuf, 0, sizeof (cmdbuf));
   char *test_so =
     rpsconf_temporary_binary_file ("./tmp_test-libgccjit", ".so", __LINE__);
+  if (access (rpsconf_libgccjit_include_dir, F_OK))
+    {
+    };
   snprintf (cmdbuf, sizeof (cmdbuf),
             "%s -fPIC -g -O -shared -DRPSJIT_GITID='\"%s\"' -I%s do-test-libgccjit.c -o %s -lgccjit",
-            cc, rpsconf_gitid, rpsconf_libgccjit_include_dir, test_so);
+            cc, rpsconf_gitid,
+            (rpsconf_libgccjit_include_dir ? rpsconf_libgccjit_include_dir :
+             "."), test_so);
   printf ("%s running %s [%s:%d]\n", rpsconf_prog_name, cmdbuf, //
           __FILE__, __LINE__ - 1);
   fflush (NULL);
@@ -903,7 +942,7 @@ rpsconf_try_cxx_compiler_for_libgccjit (const char *cxx)
       }
   }
   fflush (NULL);
-  /// the includir should contain both libgccjit.h and libgccjit++.h
+  /// the includir should contain libgccjit.h
   {
     /// check the libgccjit.h file
     char jithpath[512];
@@ -911,25 +950,11 @@ rpsconf_try_cxx_compiler_for_libgccjit (const char *cxx)
     snprintf (jithpath, sizeof (jithpath), "%s/libgccjit.h", includir);
     rpsconf_check_libgccjit_header (jithpath);
   }
-  {
-    /// check the libgccjit++.h file
-    char jitpppath[512];
-    memset (jitpppath, 0, sizeof (jitpppath));
-    snprintf (jitpppath, sizeof (jitpppath), "%s/libgccjit++.h", includir);
-    rpsconf_check_libgccjitplusplus_header (jitpppath);
-  }
-  rpsconf_libgccjit_include_dir = strdup (includir);
-  if (!rpsconf_libgccjit_include_dir)
-    {
-      fprintf (stderr,
-               "%s: failed to duplicate libgccjit include directory %s (%s) [%s:%d]\n",
-               rpsconf_prog_name, includir, strerror (errno), __FILE__,
-               __LINE__);
-      rpsconf_failed = true;
-      exit (EXIT_FAILURE);
-    }
 #warning rpsconf_try_cxx_compiler_for_libgccjit is incomplete
 }       /* end  rpsconf_try_cxx_compiler_for_libgccjit */
+#endif /*RPSCONF_WITHOUT_GCCJIT */
+
+
 
 void
 rpsconf_try_then_set_fltkconfig (const char *fc)
@@ -960,46 +985,48 @@ rpsconf_try_then_set_fltkconfig (const char *fc)
   /// run fltk-config --version and require FLTK 1.4 or 1.5
   {
     char flversbuf[80];
-    memset (flversbuf, 0, sizeof(flversbuf));
+    memset (flversbuf, 0, sizeof (flversbuf));
     memset (cmdbuf, 0, sizeof (cmdbuf));
     snprintf (cmdbuf, sizeof (cmdbuf), "%s --version", fc);
-    printf ("%s running %s [%s:%d]\n", rpsconf_prog_name, cmdbuf, __FILE__,
-            __LINE__);
+    printf ("%s running %s [%s:%d]\n", rpsconf_prog_name, cmdbuf, //
+            __FILE__, __LINE__ - 1);
     fflush (NULL);
     pipf = popen (cmdbuf, "r");
     if (!pipf)
       {
-        fprintf (stderr, "%s: failed to popen %s (%s) [%s:%d]\n",
-                 rpsconf_prog_name, cmdbuf, strerror (errno), __FILE__,
-                 __LINE__);
+        fprintf (stderr, "%s: failed to popen %s (%s) [%s:%d]\n", //
+                 rpsconf_prog_name, cmdbuf, strerror (errno), //
+                 __FILE__, __LINE__ - 2);
         rpsconf_failed = true;
         exit (EXIT_FAILURE);
       }
     if (!fgets (flversbuf, sizeof (flversbuf), pipf))
       {
-        fprintf (stderr, "%s: failed to get FLTK version using %s (%s) [%s:%d]\n",
-                 rpsconf_prog_name, cmdbuf, strerror (errno), __FILE__,
-                 __LINE__);
+        fprintf (stderr, "%s: failed to get FLTK version using %s (%s)" //
+                 " [%s:%d]\n",  //
+                 rpsconf_prog_name, cmdbuf, strerror (errno), //
+                 __FILE__, __LINE__ - 3);
         rpsconf_failed = true;
         exit (EXIT_FAILURE);
       };
-    int flmajv= -1, flminv= -1, flpatchv= -1, flpos= -1;
-    if (sscanf(flversbuf, "%d.%d.%d%n", &flmajv, &flminv, &flpatchv, &flpos)<3
-        || flpos<(int)strlen("1.2.3"))
+    int flmajv = -1, flminv = -1, flpatchv = -1, flpos = -1;
+    if (sscanf (flversbuf, "%d.%d.%d%n",  //
+                &flmajv, &flminv, &flpatchv, &flpos) < 3
+        || flpos < (int) strlen ("1.2.3"))
       {
-        fprintf (stderr, "%s: failed to query FLTK version using %s (%s) [%s:%d]\n",
-                 rpsconf_prog_name, cmdbuf, strerror (errno), __FILE__,
-                 __LINE__);
+        fprintf (stderr, "%s: failed to query FLTK version with  %s (%s)" //
+                 " [%s:%d]\n",  //
+                 rpsconf_prog_name, cmdbuf, strerror (errno), //
+                 __FILE__, __LINE__ - 2);
         rpsconf_failed = true;
         exit (EXIT_FAILURE);
       };
-    if (flmajv != 1 || (flminv != 4 && flminv != 5)
-        || flpatchv < 0)
+    if (flmajv != 1 || (flminv != 4 && flminv != 5) || flpatchv < 0)
       {
-        fprintf (stderr, "%s: needs FLTK version 1.4 or 1.5, got fltk %d.%d.%d using %s (%s) [%s:%d]\n",
-                 rpsconf_prog_name,
-                 flmajv, flminv, flpatchv,
-                 cmdbuf, strerror (errno), __FILE__,__LINE__-3);
+        fprintf (stderr, "%s: needs FLTK version 1.4 or 1.5, "  //
+                 "got fltk %d.%d.%d using %s (%s) [%s:%d]\n",
+                 rpsconf_prog_name, flmajv, flminv, flpatchv, cmdbuf,
+                 strerror (errno), __FILE__, __LINE__ - 3);
         rpsconf_failed = true;
         exit (EXIT_FAILURE);
       }
@@ -1030,7 +1057,7 @@ rpsconf_try_then_set_fltkconfig (const char *fc)
         rpsconf_failed = true;
         exit (EXIT_FAILURE);
       }
-    memset(fcflags, 0, sizeof(fcflags));
+    memset (fcflags, 0, sizeof (fcflags));
     if (!fgets (fcflags, sizeof (fcflags), pipf))
       {
         fprintf (stderr, "%s: failed to get cflags using %s (%s) [%s:%d]\n",
@@ -1066,7 +1093,7 @@ rpsconf_try_then_set_fltkconfig (const char *fc)
         rpsconf_failed = true;
         exit (EXIT_FAILURE);
       }
-    memset(fldflags, 0, sizeof(fldflags));
+    memset (fldflags, 0, sizeof (fldflags));
     if (!fgets (fldflags, sizeof (fldflags), pipf))
       {
         fprintf (stderr, "%s: failed to get ldflags using %s (%s) [%s:%d]\n",
@@ -1257,13 +1284,25 @@ rpsconf_emit_configure_refpersys_mk (void)
       /// see https://stackoverflow.com/q/2224334/841108
 #ifdef __GNUC__
       fprintf (f, "## see stackoverflow.com/q/2224334/841108\n");
+      fprintf (f, "\n## optimization and code generation flags\n");
+      fprintf (f, "ifndef REFPERSYS_CODEGEN_FLAGS\n");
+      fprintf (f, "REFPERSYS_CODEGEN_FLAGS= -O1 -fPIC\n");
+      fprintf (f, "endif #REFPERSYS_CODEGEN_FLAGS\n");
+      fprintf (f, "ifndef REFPERSYS_DEBUG_FLAGS\n");
+      fprintf (f, "REFPERSYS_DEBUG_FLAGS= -g2\n");
+      fprintf (f, "endif #REFPERSYS_DEBUG_FLAGS\n");
+      fprintf (f, "ifndef REFPERSYS_WARNING_FLAGS\n");
+      fprintf (f, "REFPERSYS_WARNING_FLAGS= -Wall -Wextra\n");
+      fprintf (f, "endif #REFPERSYS_WARNING_FLAGS\n");
       fprintf (f, "#GNU compiler from %s:%d\n"
-               "REFPERSYS_COMPILER_FLAGS= -O1 -g -fPIC -Wall -Wextra $(REFPERSYS_LTO)\n",
-               __FILE__, __LINE__ - 2);
+               "REFPERSYS_COMPILER_FLAGS= $(REFPERSYS_CODEGEN_FLAGS)"
+               " $(REFPERSYS_DEBUG_FLAGS) $(REFPERSYS_WARNING_FLAGS) $(REFPERSYS_LTO)\n",
+               __FILE__, __LINE__ - 3);
 #else
       fprintf (f, "#nonGNU compiler from %s:%d\n"
                "## see stackoverflow.com/questions/2224334/\n"
-               "REFPERSYS_COMPILER_FLAGS= -O0 -g -fPIC -Wall $(REFPERSYS_LTO) ",
+               "REFPERSYS_COMPILER_FLAGS= $(REFPERSYS_CODEGEN_FLAGS)"
+               " $(REFPERSYS_DEBUG_FLAGS) $(REFPERSYS_WARNING_FLAGS)  $(REFPERSYS_LTO) ",
                __FILE__, __LINE__ - 3);
 #endif
     }
@@ -1290,21 +1329,6 @@ rpsconf_emit_configure_refpersys_mk (void)
       ("REFPERSYS_LINKER_FLAGS= -L/usr/local/lib -rdynamic -lgccjit -ldl"
        " $(REFPERSYS_LTO)\n", f);
     }
-
-
-  /* We don't seem to require either GPP or ninja build, so disabling for now */
-#if 0
-  //// emit the generic preprocessor
-  fprintf (f,
-           "\n\n"
-           "# the Generic Preprocessor for RefPerSys (see logological.org/gpp):\n");
-  fprintf (f, "REFPERSYS_GPP=%s\n", realpath (rpsconf_gpp, NULL));
-  /// emit the ninja builder
-#endif /* 0 */
-  fprintf (f, "\n\n" "# ninja builder from ninja-build.org\n");
-  fprintf (f, "REFPERSYS_NINJA=%s\n", realpath (rpsconf_ninja_builder, NULL));
-  fprintf (f, "# generated from %s:%d git %s\n\n", __FILE__, __LINE__,
-           rpsconf_gitid);
 
   fflush (f);
   if (rpsconf_builder_person)
@@ -1464,8 +1488,6 @@ rpsconf_usage (void)
   puts ("\t                         # e.g. CC=/usr/bin/gcc");
   puts ("\t CXX=<C++ compiler>      # set the C++ compiler,");
   puts ("\t                         # e.g. CXX=/usr/bin/g++");
-  puts ("\t NINJA=<ninja-builder>   # set builder from ninja-build.org");
-  puts ("\t                         # e.g. NINJA=/usr/bin/ninja");
   puts ("\t FLTKCONF=<fltk-config>  # set path of fltk-config, see fltk.org");
   puts ("\t BUILDER_PERSON=<name>   # set the name of the person building");
   puts ("\t                         # e.g. BUILDER_PERSON='Alan TURING");
@@ -1489,11 +1511,9 @@ rpsconf_usage (void)
 }       /* end rpsconf_usage */
 
 
-
-int
-main (int argc, char **argv)
+void
+rpsconf_prelude (int argc, char **argv)
 {
-  rpsconf_prog_name = argv[0];
 #ifndef RPSCONF_WITHOUT_READLINE
   rl_readline_name = argv[0];
   rl_initialize ();
@@ -1503,7 +1523,7 @@ main (int argc, char **argv)
   if (argc == 2 && !strcmp (argv[1], "--help"))
     {
       rpsconf_usage ();
-      return 0;
+      exit (EXIT_SUCCESS);
     };
   if (argc == 2 && !strcmp (argv[1], "--version"))
     {
@@ -1516,6 +1536,7 @@ main (int argc, char **argv)
               (rl_readline_version) >> 8, (rl_readline_version) & 0xff);
 #endif
       fflush (NULL);
+      exit (EXIT_SUCCESS);
     };
   memset (rpsconf_cwd_buf, 0, sizeof (rpsconf_cwd_buf));
   if (!getcwd (rpsconf_cwd_buf, sizeof (rpsconf_cwd_buf)))
@@ -1540,35 +1561,6 @@ main (int argc, char **argv)
       fprintf (stderr,
                "%s failed too long current working directory %s [%s:%d]\n",
                rpsconf_prog_name, rpsconf_cwd_buf, __FILE__, __LINE__ - 1);
-      rpsconf_failed = true;
-      exit (EXIT_FAILURE);
-    };
-  atexit (rpsconf_remove_files);
-  printf ("%s: configurator program for RefPerSys inference engine\n",
-          rpsconf_prog_name);
-  printf
-  ("%s: [FRENCH] programme de configuration du moteur d'inférences RefPerSys\n",
-   rpsconf_prog_name);
-  printf ("\t cf refpersys.org & github.com/RefPerSys/RefPerSys\n");
-  printf ("\t   REFlexive PERsistent SYStem\n");
-  printf
-  ("\t Contact: Basile STARYNKEVITCH, 8 rue de la Faïencerie, 92340 Bourg-la-Reine\n");
-  fflush (NULL);
-  printf ("%s: when asked for a file path, you can run a shell command ...\n"
-          "... if your input starts with an exclamation point\n",
-          rpsconf_prog_name);
-  printf
-  ("\t When asked for file paths, you are expected to enter an absolute one,\n"
-   "\t for example /etc/passwd\n"
-   "\t if you enter something starting with ! it is a shell command\n"
-   "\t which is run and the question is repeated.\n");
-  fflush (NULL);
-  if (argc > RPSCONF_MAX_PROG_ARGS)
-    {
-      fprintf (stderr,
-               "%s (from C file %s) limits RPSCONF_MAX_PROG_ARGS to %d\n"
-               "... but %d are given! Edit it and recompile!\n",
-               argv[0], __FILE__, RPSCONF_MAX_PROG_ARGS, argc);
       rpsconf_failed = true;
       exit (EXIT_FAILURE);
     };
@@ -1624,14 +1616,59 @@ main (int argc, char **argv)
       if (*pc == '=')
         putenv (curarg);
     };
+}       /* end rpsconf_prelude */
+
+
+
+
+int
+main (int argc, char **argv)
+{
+  rpsconf_prog_name = argv[0];
+  rpsconf_prelude (argc, argv);
+  atexit (rpsconf_remove_files);
+  printf ("%s: configurator program for RefPerSys inference engine\n",
+          rpsconf_prog_name);
+  printf ("%s: [FRENCH]\n\t programme de configuration du\n"  //
+          "\t moteur d'inférences RefPerSys\n", rpsconf_prog_name);
+  printf ("\t cf refpersys.org & github.com/RefPerSys/RefPerSys\n");
+  printf ("\t   REFlexive PERsistent SYStem\n");
+  printf ("\t Contact: Basile STARYNKEVITCH,\n" //
+          "\t 8 rue de la Faïencerie,\n" //
+          "\t 92340 Bourg-la-Reine\n" //
+          "\t (France)\n");
+  fflush (NULL);
+  printf ("%s: when asked for a file path, you can run a shell command ...\n"
+          "... if your input starts with an exclamation point\n",
+          rpsconf_prog_name);
+  printf
+  ("\t When asked for file paths, you are expected to enter an absolute one,\n"
+   "\t for example /etc/passwd\n"
+   "\t if you enter something starting with ! it is a shell command\n"
+   "\t which is run and the question is repeated.\n");
+  fflush (NULL);
+  if (argc > RPSCONF_MAX_PROG_ARGS)
+    {
+      fprintf (stderr,
+               "%s (from C file %s) limits RPSCONF_MAX_PROG_ARGS to %d\n"
+               "... but %d are given! Edit it and recompile!\n",
+               argv[0], __FILE__, RPSCONF_MAX_PROG_ARGS, argc);
+      rpsconf_failed = true;
+      exit (EXIT_FAILURE);
+    };
+  printf
+  ("\nThe C and C++ compilers (maybe $CC and $CXX) should be preferably\n"
+   "from gcc.gnu.org (or at least compatible)\n");
+  fflush (NULL);
   char *cc = getenv ("CC");
   if (!cc)
     {
       if (!access ("/usr/bin/gcc", F_OK))
-        cc = rpsconf_defaulted_readline ("C compiler, preferably gcc:",
-                                         "/usr/bin/gcc");
+        cc =
+          rpsconf_defaulted_readline ("C compiler [default /usr/bin/gcc]: ",
+                                      "/usr/bin/gcc");
       else
-        cc = rpsconf_readline ("C compiler, preferably gcc:");
+        cc = rpsconf_readline ("C compiler [default /usr/bin/gcc]: ");
     };
   if (!cc)
     cc = "/usr/bin/gcc";
@@ -1643,11 +1680,16 @@ main (int argc, char **argv)
   if (!cxx)
     {
       if (!access ("/usr/bin/g++", F_OK))
-        cxx = rpsconf_defaulted_readline ("C++ compiler, preferably g++:",
-                                          "/usr/bin/g++");
+        cxx =
+          rpsconf_defaulted_readline ("C++ compiler [default /usr/bin/g++:",
+                                      "/usr/bin/g++");
       else
-        cxx = rpsconf_readline ("C++ compiler:");
+        cxx = rpsconf_readline ("C++ compiler [default /usr/bin/g++]: ");
     };
+
+  if (!cxx)
+    cxx = "/usr/bin/g++";
+
   rpsconf_try_then_set_cxx_compiler (cxx);
   rpsconf_try_cxx_compiler_for_libgccjit (cc);
   rpsconf_test_libgccjit_compilation (cc);
@@ -1692,42 +1734,13 @@ main (int argc, char **argv)
         }
     }
   errno = 0;
-  rpsconf_gpp = getenv ("GPP");
-  if (!rpsconf_gpp)
-    {
-      puts
-      ("Generic Preprocessor (by Tristan Miller and Denis Auroux, see logological.org/gpp ...)");
-      rpsconf_gpp = rpsconf_readline ("Generic Preprocessor full path:");
-      if (access (rpsconf_gpp, X_OK))
-        {
-          fprintf (stderr,
-                   "%s bad Generic Preprocessor %s (%s) [%s:%d]\n",
-                   rpsconf_prog_name, rpsconf_gpp ? rpsconf_gpp : "???",
-                   strerror (errno), __FILE__, __LINE__ - 3);
-          rpsconf_failed = true;
-          exit (EXIT_FAILURE);
-        }
-    };
-  assert (rpsconf_gpp != NULL);
 
-  rpsconf_ninja_builder = getenv ("NINJA");
-  if (!rpsconf_ninja_builder)
-    {
-      rpsconf_ninja_builder = rpsconf_readline ("ninja builder:");
-      if (access (rpsconf_ninja_builder, X_OK))
-        {
-          fprintf (stderr,
-                   "%s bad ninja builder %s (%s) [%s:%d]\n",
-                   rpsconf_prog_name,
-                   rpsconf_ninja_builder ? rpsconf_ninja_builder : "???",
-                   strerror (errno), __FILE__, __LINE__ - 3);
-          rpsconf_failed = true;
-          exit (EXIT_FAILURE);
-        }
-    };
   rpsconf_fltk_config = getenv ("FLTKCONFIG");
   if (!rpsconf_fltk_config)
     {
+      printf ("\nFLTK is a graphical toolkit from www.fltk.org\n"
+              "\t providing a configurator script\n");
+      fflush (stdout);
       rpsconf_fltk_config = rpsconf_readline ("FLTK configurator:");
       if (access (rpsconf_fltk_config, X_OK))
         {
@@ -1740,16 +1753,58 @@ main (int argc, char **argv)
           exit (EXIT_FAILURE);
         }
     }
+
+  if (access ("generated/rpsdata.h", R_OK))
+    {
+      char datapath[RPSCONF_PATH_MAXLEN];
+      memset (datapath, 0, sizeof (datapath));
+      snprintf (datapath, sizeof (datapath) - 1,
+                "rpsdata_%s_%s.h", rpsconf_opersys, rpsconf_arch);
+      if (symlink (datapath, "generated/rpsdata.h"))
+        {
+          fprintf (stderr,
+                   "%s failed symlink %s to %s : %s [%s:%d]\n",
+                   rpsconf_prog_name, "generated/rpsdata.h", datapath,
+                   strerror (errno), __FILE__, __LINE__ - 3);
+          rpsconf_failed = true;
+          exit (EXIT_FAILURE);
+        };
+      if (rpsconf_verbose)
+        {
+          printf ("%s symlinked %s to %s [%s:%d]\n",
+                  rpsconf_prog_name, "generated/rpsdata.h", datapath,
+                  __FILE__, __LINE__ - 2);
+          fflush (NULL);
+        }
+    }
+  else
+    {
+      if (rpsconf_verbose)
+        {
+          printf ("%s accessed generated/rpsdata.h [%s:%d]\n",
+                  rpsconf_prog_name, __FILE__, __LINE__ - 2);
+        }
+    };
   ///emit file config-refpersys.mk to be included by GNU make
   rpsconf_emit_configure_refpersys_mk ();
   fprintf (stderr,
-           "[%s:%d] perhaps missing code to emit some refpersys-config.h....\n",
-           __FILE__, __LINE__);
+           "[%s:%d] perhaps missing code to emit some refpersys-config.h....\n"
+           "git %s opersys %s arch %s host %s in %s on %s\n",
+           __FILE__, __LINE__ - 2,
+           rpsconf_gitid, rpsconf_opersys, rpsconf_arch, rpsconf_host,
+           rpsconf_cwd_buf, rpsconf_host_name);
   return 0;
 #warning TODO perhaps we should emit also a refpersys-config.h file
   /// that hypothetical refpersys-config.h would be included by refpersys.hh
 }       /* end main */
 
+
+
+
+
+
+
+////////////////////////////////
 /*
  * Helper Functions
  */
@@ -1934,8 +1989,8 @@ rpsconf_cc_set (const char *cc)
   assert (cc != NULL);
   if (*cc == '\0')
     {
-      RPSCONF_DIAG ("missing C compiler path");
-      return RPSCONF_FAIL;
+      fprintf (stderr, "C compiler path not specified, using /usr/bin/gcc\n");
+      cc = "/usr/bin/gcc";
     };
 
   if (*cc != '/')
@@ -1960,7 +2015,7 @@ rpsconf_cc_set (const char *cc)
 /****************
  **                           for Emacs...
  ** Local Variables: ;;
- ** compile-command: "make do-configure-refpersys" ;;
+ ** compile-command: "make -C $REFPERSYS_TOPDIR/. do-configure-refpersys" ;;
  ** End: ;;
  ****************/
 

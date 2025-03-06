@@ -1,7 +1,7 @@
 // see http://refpersys.org/
 // passed to commits after 6116cfa50f84af (of Sept, 20, 2024)
 // GPLv3+ licensed
-// © Copyright 2023 - 2024 Basile Starynkevitch <basile@starynkevitch.net>
+// © Copyright 2023 - 2025 Basile Starynkevitch <basile@starynkevitch.net>
 // This plugin creates a new RefPerSys named selector
 // lots of code from similar rpsplug_createnamedattribute.cc
 /*****
@@ -70,9 +70,9 @@ rps_do_plugin(const Rps_Plugin* plugin)
         isconstant = true;
       else if (!strcmp(constant, "false"))
         isconstant = false;
-      else if (constant[0]=='Y' || constant[0]=='y')
+      else if (constant[0]=='Y' || constant[0]=='y' || constant[0]=='1')
         isconstant = true;
-      else if (constant[0]=='N' || constant[0]=='n')
+      else if (constant[0]=='N' || constant[0]=='n' || constant[0]=='0')
         isconstant = false;
       else if (isdigit(constant[0]))
         isconstant = atoi(constant)>0;
@@ -152,6 +152,6 @@ rps_do_plugin(const Rps_Plugin* plugin)
 /****************
  **                           for Emacs...
  ** Local Variables: ;;
- ** compile-command: "cd ..; ./do-build-refpersys-plugin plugins_dir/rpsplug_createnamedselector.cc -o /tmp/rpsplug_createnamedselector.so" ;;
+ ** compile-command: "cd ..; make plugins_dir/rpsplug_createnamedselector.so && /bin/ln -svf $(/bin/pwd)/plugins_dir/rpsplug_createnamedselector.so /tmp/" ;;
  ** End: ;;
  ****************/

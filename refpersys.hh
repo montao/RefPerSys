@@ -11,7 +11,7 @@
  *      Abhishek Chakravarti, India    <abhishek@taranjali.org>
  *      Nimesh Neema, India            <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * You can consider RefPerSys as either GPLv3+ or LGPLv3+ licensed (at
@@ -371,20 +371,33 @@ extern "C" const char rps_lastgittag[];
 extern "C" const char rps_lastgitcommit[];
 extern "C" const char rps_md5sum[];
 extern "C" const char*const rps_files[];
+/// the GNU make utility see www.gnu.org/software/make/
 extern "C" const char rps_gnumakefile[];
 extern "C" const char rps_gnu_make[];
 extern "C" const char rps_gnu_make_version[];
+extern "C" const char rps_gnu_make_features[];
+/// the GNU bison parser generator see www.gnu.org/software/bison/
 extern "C" const char rps_gnu_bison[];
 extern "C" const char rps_gnu_bison_version[];
 
+/// the Carburetta parser generator see carburetta.com & github.com/kingletbv/carburetta
+extern "C" const char rps_carburetta[];
+extern "C" const char rps_carburetta_version[];
+
+
+/// subdirectoris
 extern "C" const char*const rps_subdirectories[];
+
+/// realpath and version of the GNU C++ compiler see gcc.gnu.org
 extern "C" const char rps_cxx_compiler_realpath[];
 extern "C" const char rps_cxx_compiler_version[];
+
+/// the GPP generic preprocessor from logological.org/gpp
+/// we may in 2025 not need to use it
 extern "C" const char rps_gpp_preprocessor_command[];
 extern "C" const char rps_gpp_preprocessor_realpath[];
 extern "C" const char rps_gpp_preprocessor_version[];
-extern "C" const char rps_ninja_builder[];
-extern "C" const char rps_ninja_version[];
+
 
 extern "C" const char rps_plugin_builder[];
 
@@ -1327,6 +1340,10 @@ public:
   {
     return const_cast<const Rps_ObjectZone*>(_optr);
   };
+  /// Compare two object references for display to humans
+  /// so if both have names, use them....
+  static int compare_for_display(const Rps_ObjectRef leftob,
+                                 const Rps_ObjectRef rightob);
   bool is_empty() const
   {
     return _optr == nullptr || _optr == (Rps_ObjectZone*)RPS_EMPTYSLOT;
@@ -1504,13 +1521,51 @@ public:
 
 
 
-
 static_assert(sizeof(Rps_ObjectRef) == sizeof(void*),
               "Rps_ObjectRef should have the size of a word");
 static_assert(alignof(Rps_ObjectRef) == alignof(void*),
               "Rps_ObjectRef should have the alignment of a word");
 
 
+class Rps_Object_Display /// use it only with RPS_OBJECT_DISPLAY.... macros
+{
+  Rps_ObjectRef _dispobref;
+  const char* _dispfile;
+  int _displine;
+  int _dispdepth;
+public:
+  static constexpr int disp_default_depth=1;
+  static constexpr int disp_max_depth=8;
+  Rps_Object_Display() : _dispobref(nullptr), _dispfile(nullptr), _displine(0), _dispdepth(0) {};
+  Rps_Object_Display(const Rps_ObjectRef obr, int depth, const char*file, int line)
+    : _dispobref(obr), _dispfile(file), _displine(line),
+      _dispdepth(disp_default_depth) {};
+  Rps_Object_Display(const Rps_ObjectRef obr, const char*file, int line)
+    : _dispobref(obr), _dispfile(file), _displine(line),
+      _dispdepth(disp_default_depth) {};
+  ~Rps_Object_Display()
+  {
+    _dispobref=nullptr;
+    _dispfile=nullptr;
+    _dispdepth=0;
+    _displine=0;
+  };
+  Rps_Object_Display(const Rps_Object_Display&) = default;
+  Rps_Object_Display(Rps_Object_Display&&) = default;
+  void output_display(std::ostream&out) const;
+  void output_routine_addr(std::ostream&out, void*funaddr) const;
+};        // end class Rps_Object_Display
+
+#define RPS_OBJECT_DISPLAY(Ob) Rps_Object_Display((Ob),__FILE__,__LINE__)
+#define RPS_OBJECT_DISPLAY_DEPTH(Ob,Depth) Rps_Object_Display((Ob),(Depth),__FILE__,__LINE__)
+
+extern "C" void rps_sort_object_vector_for_display(std::vector<Rps_ObjectRef>&);
+
+inline std::ostream&operator <<(std::ostream&out, const Rps_Object_Display& obdisp)
+{
+  obdisp.output_display(out);
+  return out;
+};
 
 // we could code Rps_ObjectFromOidRef(&_,"_41OFI3r0S1t03qdB2E") instead of rpskob_41OFI3r0S1t03qdB2E
 class Rps_ObjectFromOidRef : public Rps_ObjectRef
@@ -3213,6 +3268,7 @@ typedef Rps_TwoValues rps_applyingfun_t (Rps_CallFrame*callerframe,
 class Rps_Payload;
 class Rps_ObjectZone : public Rps_ZoneValue
 {
+  friend class Rps_Object_Display;
   ///
 public:
   enum registermode_en
@@ -3308,6 +3364,14 @@ public:
   {
     return &ob_mtx;
   };
+  rps_magicgetterfun_t*magic_getter_function(void) const
+  {
+    return ob_magicgetterfun.load();
+  };
+  rps_applyingfun_t*applying_function(void) const
+  {
+    return ob_applyingfun.load();
+  };
   void put_applying_function(rps_applyingfun_t*afun);
   void touch_now(void)
   {
@@ -3331,6 +3395,8 @@ public:
   void put_space(Rps_ObjectRef obspace);
   //////////////// attributes
   Rps_Value set_of_attributes(Rps_CallFrame*stkf) const;
+  Rps_Value set_of_physical_attributes() const;
+  unsigned nb_physical_attributes() const;
   unsigned nb_attributes(Rps_CallFrame*stkf) const;
   Rps_Value get_physical_attr(const Rps_ObjectRef obattr0) const;
   Rps_Value get_attr1(Rps_CallFrame*stkf,const Rps_ObjectRef obattr0) const;
@@ -3372,6 +3438,8 @@ public:
   void append_components(const std::initializer_list<Rps_Value>&compil);
   void append_components(const std::vector<Rps_Value>&compvec);
   unsigned nb_components(Rps_CallFrame*stkf) const;
+  unsigned nb_physical_components (void) const;
+  const std::vector<Rps_Value> vector_physical_components(void) const;
   Rps_Value component_at (Rps_CallFrame*stkf, int rk, bool dontfail=false) const;
   Rps_Value replace_component_at ([[maybe_unused]] Rps_CallFrame*stkf, int rk,  Rps_Value comp0, bool dontfail=false);
   Rps_Value instance_from_components(Rps_CallFrame*stkf, Rps_ObjectRef obinstclass) const;
@@ -3562,6 +3630,10 @@ public:
   Rps_ObjectZone* owner() const
   {
     return payl_owner;
+  };
+  virtual void output_payload([[maybe_unused]] std::ostream&out, [[maybe_unused]] unsigned depth, [[maybe_unused]] unsigned maxdepth) const
+  {
+    RPS_ASSERT(depth <= maxdepth);
   };
 };                              // end Rps_Payload
 
@@ -4621,6 +4693,7 @@ public:
     if (obsel)
       pclass_methdict.erase(obsel);
   };
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadClassInfo
 
 
@@ -4707,6 +4780,7 @@ public:
       };
     return Rps_TupleValue(vecob);
   };
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadSetOb
 
 
@@ -4776,6 +4850,7 @@ public:
   {
     return Rps_TupleValue(pvectob);
   };
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadVectOb
 
 
@@ -4851,6 +4926,7 @@ public:
   /* make a new instance of a given class and the values inside the
      vector payload: */
   const Rps_InstanceZone* make_instance_zone_from_vector(Rps_ObjectRef classob);
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadVectVal
 
 
@@ -4936,6 +5012,7 @@ public:
   void clear_buffer(void);
   void append_string(const std::string&str);
   void prepend_string(const std::string&str);
+  //  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end of class Rps_PayloadStrBuf
 
 
@@ -4979,6 +5056,7 @@ public:
   void iterate_with_data(void*data, const std::function <bool(void*,const std::string&,const Rps_Value)>& stopfun);
   /// iterate by applying a closure to the owner, a fresh string value and associated value till the closure returns nil
   void iterate_apply(Rps_CallFrame*callframe, Rps_Value closv);
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 private:
   std::map<std::string, Rps_Value> dict_map;
   bool dict_is_transient;
@@ -5020,6 +5098,7 @@ public:
     return "space";
   };
   inline Rps_PayloadSpace(Rps_ObjectZone*obz, Rps_Loader*ld);
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadSpace
 
 
@@ -5128,6 +5207,7 @@ public:
   // returns true. Return the number of matches, or else 0
   static int autocomplete_name(const char*prefix,
                                const std::function<bool(const Rps_ObjectZone*,const std::string&)>&stopfun);
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadSymbol
 
 
@@ -5201,6 +5281,7 @@ public:
           break;
       }
   };
+  //virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadObjMap
 
 
@@ -5437,6 +5518,11 @@ extern "C" void rps_print_types_info (void);
 extern "C" void rps_repl_lexer_test(void);
 
 extern "C" void rps_do_repl_commands_vec(const std::vector<std::string>&cmdvec);
+
+
+/// this routine set some native data in loaded heap, like the size of
+/// predefined types...
+extern "C" void rps_set_native_data_in_loader(Rps_Loader*);
 
 extern "C" void rps_run_loaded_application(int &argc, char **argv);
 
@@ -5796,13 +5882,15 @@ public:
   /// return a string, a number, a Json which gets written on the
   /// pipe.
   const Rps_ClosureValue get_input_closure(void) const;
-  // set the input closure, should be called before forking.
+  // set the input closure, should be called before forking ie before
+  // start_process
   void put_input_closure(Rps_ClosureValue);
   /// the output closure is called when the process give some output on
   /// its stdout, which is then some pipe(2). The closure is given the
   /// owner of the Rps_PayloadUnixProcess as argument
   const Rps_ClosureValue get_output_closure(void) const;
-  // set the input closure, should be called before forking.
+  // set the output closure, should be called before forking ie before
+  // start_process.
   void put_output_closure(Rps_ClosureValue);
 #warning missing member functions related to output pipe...
   /// fork the process

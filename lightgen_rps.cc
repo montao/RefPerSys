@@ -13,7 +13,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2023 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2023 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -66,10 +66,15 @@ const char rps_lightgen_shortgitid[]= RPS_SHORTGITID;
 /// According to www.gnu.org/software/lightning/manual/lightning.html
 /// every GNU lightning macro uses the _jit identifier... The type of
 /// that identifier is a pointer to the abstract jit_state_t ...
+////////////////////////////////////////////////////////////////
+
+
+extern "C" void rpsldpy_lightning_code_generator(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno);
 
 /// temporary payload for GNU lightning code generation:
 class Rps_PayloadLightningCodeGen : public Rps_Payload
 {
+  friend void rpsldpy_lightning_code_generator(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno);
 public:
   typedef long lightnodenum_t;
   friend Rps_PayloadLightningCodeGen*
@@ -116,6 +121,11 @@ public:
   {
     RPSJITLIGHTPAYLOAD_LOCKGUARD();
     jit_realize();
+  };
+  bool rpsjit_is_frozen() const
+  {
+    RPSJITLIGHTPAYLOAD_LOCKGUARD();
+    return lightg_jist == nullptr;
   };
   lightnodenum_t rpsjit_register_node(jit_node_t  *jn)
   {
@@ -165,6 +175,8 @@ public:
       }
     return num;
   };
+  Rps_ObjectRef make_lightgen_code_object(Rps_CallFrame*callframe, Rps_ObjectRef classarg, Rps_ObjectRef spacearg);
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };        // end class Rps_PayloadLightningCodeGen
 
 Rps_PayloadLightningCodeGen::Rps_PayloadLightningCodeGen(Rps_ObjectZone*owner)
@@ -209,8 +221,42 @@ Rps_PayloadLightningCodeGen::dump_json_content(Rps_Dumper*du, Json::Value&jv) co
 {
   RPS_ASSERT(du);
   RPS_POSSIBLE_BREAKPOINT();
+#warning incomplete Rps_PayloadLightningCodeGen::dump_json_content
+  RPS_WARNOUT("incomplete Rps_PayloadLightningCodeGen::dump_json_content owner=" << RPS_OBJECT_DISPLAY(owner()));
 } // end Rps_PayloadLightningCodeGen::dump_json_content
 
+void
+rpsldpy_lightning_code_generator(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+{
+  RPS_ASSERT(obz != nullptr);
+  RPS_ASSERT(ld != nullptr);
+  RPS_ASSERT(obz->get_payload() == nullptr);
+  RPS_ASSERT(jv.type() == Json::objectValue);
+  auto payl = obz->put_new_plain_payload<Rps_PayloadLightningCodeGen>();
+  RPS_ASSERT(payl);
+#warning unimplemented rpsldpy_lightning_code_generator
+  RPS_WARNOUT("unimplemented rpsldpy_lightning_code_generator jv=" << jv << std::endl
+              << " spacid=" << spacid
+              << " lineno=" << lineno << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rpsldpy_lightning_code_generator"));
+} // end rpsldpy_lightning_code_generator
+
+void
+Rps_PayloadLightningCodeGen::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> guown(*(owner()->objmtxptr()));
+  out << BOLD_esc << "* GNU lighning code generator for "
+      << lightg_num2nod_map.size() << " nodes*"
+      << NORM_esc << std::endl;
+} // end Rps_PayloadLightningCodeGen::output_payload
 
 ////////////////////////////////////////////////////////////////
 //// Returns true on successful code generation
@@ -251,10 +297,14 @@ rps_generate_lightning_code(Rps_CallFrame*callerframe,
   ///TODO: perhaps a better attribute is needed
   _f.obgenerator->put_attr(RPS_ROOT_OB(_5VC4IuJ0dyr01b8lA0), //generate_code∈named_selector
                            _f.genparamv);
-  RPS_DEBUG_LOG (CODEGEN, "GNU lightning generator " << _f.obgenerator
-                 << " for module " << _f.obmodule
+  RPS_DEBUG_LOG (CODEGEN, "GNU lightning generator "
+                 << RPS_OBJECT_DISPLAY(_f.obgenerator)
+                 << std::endl
+                 << " for module " << RPS_OBJECT_DISPLAY(_f.obmodule)
+                 << std::endl
                  << " generation params " << _f.genparamv << std::endl
-                 << " thread=" << rps_current_pthread_name());
+                 << " thread=" << rps_current_pthread_name()
+                 << " jit_r_num=" << JIT_R_NUM << " jit_v_num=" << JIT_V_NUM);
   /// iterate on every component of the module
   int mix = -1;
   for (mix = 0; (unsigned)mix < _f.obmodule->nb_components(&_); mix++)
@@ -314,12 +364,49 @@ rps_generate_lightning_code(Rps_CallFrame*callerframe,
         };
     };
   RPS_WARNOUT("unimplemented rps_generate_lightning_code obmodule="
-              << _f.obmodule << " obgenerator=" << _f.obgenerator
+              << RPS_OBJECT_DISPLAY(_f.obmodule) << std::endl
+              << " obgenerator=" << RPS_OBJECT_DISPLAY(_f.obgenerator) << std::endl
               << " genparamv=" << _f.genparamv << std::endl
               << " thread=" << rps_current_pthread_name()
               << std::endl
               << RPS_FULL_BACKTRACE_HERE(1, "rps_generate_lightning_code/end-incomplete"));
 #warning unimplemented rps_generate_lightning_code
+  return false;
 } // end rps_generate_lightning_code
+
+
+
+Rps_ObjectRef
+Rps_PayloadLightningCodeGen::make_lightgen_code_object(Rps_CallFrame*callframe, Rps_ObjectRef obclassarg, Rps_ObjectRef obspacearg)
+{
+  RPS_ASSERT(!callframe || callframe->is_good_call_frame());
+  RPS_LOCALFRAME(rpskob_4pI1uwdcVBJ01qlUth, //$lightning_code_object∈class,
+                 callframe,
+                 Rps_ObjectRef oblightgen;
+                 Rps_ObjectRef obclass;
+                 Rps_ObjectRef obspace;
+                );
+  _f.obclass = obclassarg;
+  _f.obspace = obspacearg;
+  if (!_f.obclass)
+    _f.obclass = rpskob_4pI1uwdcVBJ01qlUth; //$lightning_code_object∈class
+  else if (!Rps_Value(_f.obclass).is_subclass_of(&_,
+           rpskob_4pI1uwdcVBJ01qlUth //$lightning_code_object∈class
+                                                ))
+    {
+      RPS_WARNOUT("make_lightgen_code_object with bad class " << RPS_OBJECT_DISPLAY(_f.obclass)
+                  << " from " << RPS_FULL_BACKTRACE_HERE(1, "Rps_PayloadLightningCodeGen::make_lightgen_code_object"));
+      throw std::runtime_error("invalid class for make_lightgen_code_object");
+    };
+  _f.oblightgen =  Rps_ObjectRef::make_object(&_, _f.obclass, _f.obspace);
+  auto paylgen =  _f.oblightgen->put_new_plain_payload<Rps_PayloadLightningCodeGen>();
+  RPS_ASSERT(paylgen);
+  RPS_DEBUG_LOG (CODEGEN, "make_lightgen_code_object made " << RPS_OBJECT_DISPLAY(_f.oblightgen)
+                 << std::endl
+                 <<  " from " << RPS_FULL_BACKTRACE_HERE(1, "Rps_PayloadLightningCodeGen::make_lightgen_code_object"));
+#warning probably incomplete Rps_PayloadLightningCodeGen::make_lightgen_code_object
+  return _f.oblightgen;
+} // end Rps_PayloadLightningCodeGen::make_lightgen_code_object
+
 
 #warning incomplete lightgen_rps.cc file

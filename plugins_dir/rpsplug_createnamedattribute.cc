@@ -1,7 +1,7 @@
 // see http://refpersys.org/
 // passed to commits after  9d1db4092 (of July 13, 2023)
 // GPLv3+ licensed
-// © Copyright 2023 - 2024 Basile Starynkevitch <basile@starynkevitch.net>
+// © Copyright 2023 - 2025 Basile Starynkevitch <basile@starynkevitch.net>
 // This plugin creates a new RefPerSys named attribute
 /*****
 
@@ -49,37 +49,37 @@ rps_do_plugin(const Rps_Plugin* plugin)
   if (rooted)
     {
       if (!strcmp(rooted, "true"))
-	isrooted = true;
+        isrooted = true;
       else if (!strcmp(rooted, "false"))
-	isrooted = false;
+        isrooted = false;
       else if (rooted[0]=='Y' || rooted[0]=='y')
-	isrooted = true;
+        isrooted = true;
       else if (rooted[0]=='N' || rooted[0]=='n')
-	isrooted = false;
-      else if (isdigit(rooted[0])) 
-	isrooted = atoi(rooted)>0;
+        isrooted = false;
+      else if (isdigit(rooted[0]))
+        isrooted = atoi(rooted)>0;
       else RPS_WARNOUT(" plugin " << plugin->plugin_name
-		       << " is ignoring rooted=" << Rps_QuotedC_String(rooted)
-		       << " extra argument."
-		       << std::endl << "(expecting true/false or yes/no or a digit)");
+                         << " is ignoring rooted=" << Rps_QuotedC_String(rooted)
+                         << " extra argument."
+                         << std::endl << "(expecting true/false or yes/no or a digit)");
     };
   if (constant)
     {
       if (!strcmp(constant, "true"))
-	isconstant = true;
+        isconstant = true;
       else if (!strcmp(constant, "false"))
-	isconstant = false;
+        isconstant = false;
       else if (constant[0]=='Y' || constant[0]=='y')
-	isconstant = true;
+        isconstant = true;
       else if (constant[0]=='N' || constant[0]=='n')
-	isconstant = false;
+        isconstant = false;
       else if (isdigit(constant[0]))
-	isconstant = atoi(constant)>0;
+        isconstant = atoi(constant)>0;
       else RPS_WARNOUT(" plugin " << plugin->plugin_name
-		       << " is ignoring constant=" << Rps_QuotedC_String(constant)
-		       << " extra argument."
-		       << std::endl
-		       << "(expecting true/false or yes/no or a digit)");
+                         << " is ignoring constant=" << Rps_QuotedC_String(constant)
+                         << " extra argument."
+                         << std::endl
+                         << "(expecting true/false or yes/no or a digit)");
     };
   /* Check that plugarg is some new name */
   if (auto nob = Rps_ObjectRef::find_object_or_null_by_string(&_, std::string(plugarg)))
@@ -88,10 +88,10 @@ rps_do_plugin(const Rps_Plugin* plugin)
                    << " is naming an existing object " << nob);
     };
   RPS_INFORMOUT("plugin " << plugin->plugin_name
-		<< " should create a symbol named " << Rps_Cjson_String(plugarg)
-		<< " " << (isrooted?"root":"non-root")
-		<< " " << (isconstant?"constant":"non-constant")
-		);
+                << " should create a symbol named " << Rps_Cjson_String(plugarg)
+                << " " << (isrooted?"root":"non-root")
+                << " " << (isconstant?"constant":"non-constant")
+               );
   /* Create a symbol for the new class name. */
   _f.obsymbol = Rps_ObjectRef::make_new_strong_symbol(&_, std::string{plugarg});
   std::lock_guard<std::recursive_mutex> gusymbol(*(_f.obsymbol->objmtxptr()));
@@ -120,27 +120,28 @@ rps_do_plugin(const Rps_Plugin* plugin)
   if (isrooted)
     {
       RPS_DEBUG_LOG(REPL, "rpsplug_createnamedattribute adding new root namedattr " << _f.obnamedattr
-		    << " of class " << _f.obnamedattr->compute_class(&_) << " space " << _f.obnamedattr->get_space());
+                    << " of class " << _f.obnamedattr->compute_class(&_) << " space " << _f.obnamedattr->get_space());
       rps_add_root_object(_f.obnamedattr);
       RPS_INFORMOUT("rpsplug_createnamedattribute added new root named attribute "
-		    << _f.obnamedattr
+                    << _f.obnamedattr
                     << " named " << plugarg
                     << " with symbol " << _f.obsymbol);
     }
-  else if (isconstant) {
+  else if (isconstant)
+    {
       RPS_DEBUG_LOG(REPL, "rpsplug_createnamedattribute adding new constant namedattr " << _f.obnamedattr
-		    << " of class " << _f.obnamedattr->compute_class(&_) << " space " << _f.obnamedattr->get_space());
-    rps_add_constant_object(&_, _f.obnamedattr);
-    RPS_INFORMOUT("rpsplug_createnamedattribute added new constant named attribute "
-		  << _f.obnamedattr << std::endl
-		  << " of class " << _f.obnamedattr->compute_class(&_) << " space " <<  _f.obnamedattr->get_space()
-		  << " named " << plugarg
-		  << " with symbol " << _f.obsymbol);
-  }
+                    << " of class " << _f.obnamedattr->compute_class(&_) << " space " << _f.obnamedattr->get_space());
+      rps_add_constant_object(&_, _f.obnamedattr);
+      RPS_INFORMOUT("rpsplug_createnamedattribute added new constant named attribute "
+                    << _f.obnamedattr << std::endl
+                    << " of class " << _f.obnamedattr->compute_class(&_) << " space " <<  _f.obnamedattr->get_space()
+                    << " named " << plugarg
+                    << " with symbol " << _f.obsymbol);
+    }
   else
     {
       RPS_INFORMOUT("rpsplug_createnamedattribute added new named attribute " << _f.obnamedattr
-		    << " of class " << _f.obnamedattr->compute_class(&_) << " space " << _f.obnamedattr->get_space()
+                    << " of class " << _f.obnamedattr->compute_class(&_) << " space " << _f.obnamedattr->get_space()
                     << " named " << plugarg
                     << " with symbol " << _f.obsymbol);
     }
@@ -150,6 +151,6 @@ rps_do_plugin(const Rps_Plugin* plugin)
 /****************
  **                           for Emacs...
  ** Local Variables: ;;
- ** compile-command: "cd ..; ./do-build-refpersys-plugin plugins_dir/rpsplug_createnamedattribute.cc -o /tmp/rpsplug_createnamedattribute.so" ;;
+ ** compile-command: "cd ..;  make plugins_dir/rpsplug_createnamedattribute.so && /bin/ln -sfv $(/bin/pwd)/plugins_dir/rpsplug_createnamedattribute.so /tmp/" ;;
  ** End: ;;
  ****************/

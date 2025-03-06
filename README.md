@@ -80,6 +80,10 @@ make utility, including BSD make, is not ok). the
 accessible and likewise for other [GNU](https://www.gnu.org/software/)
 utilities.
 
+The GNU `make` software should have version at least 4 and be
+configured to use [GNU
+guile](https://www.gnu.org/software/guile/). See [GNU make bug
+#66658](https://savannah.gnu.org/bugs/index.php?66658).
 
 Conventionally any *RefPerSys* specific environment variable (outside
 of the usual environment variables mentioned above) is starting with
@@ -313,6 +317,16 @@ tool used here is [GNU make](https://www.gnu.org/software/make/) since
 commit `6d56f50660c7cc41b9` (it was
 [omake](https://github.com/ocaml-omake/omake) before).
 
+
+The GNU [lightning](https://www.gnu.org/software/lightning/) library
+is need for machine code generation. You may want to compile it from
+source code and configure this *lightning* library with
+```
+./configure  --with-gnu-ld  --enable-disassembler   --enable-devel-disassembler \
+  --enable-devel-get-jit-size   --disable-silent-rules CFLAGS='-O2 -g2'
+```
+then the usual build commands.
+
 You should have compiled and installed Ian Taylor's
 [libbacktrace](https://github.com/ianlancetaylor/libbacktrace),
 e.g. under `/usr/local/`. You may need to add `/usr/local/lib/` in
@@ -352,7 +366,9 @@ mid-september 2023.  It uses GNU libunistring and is shared (in file
 
 ### Related files
 
-See also some files from [misc-basile](https://github.com/bstarynk/misc-basile)
+See also some files from
+[misc-basile](https://github.com/bstarynk/misc-basile) in particular
+`build-with-guile.c`
 
 ### Build instructions
 

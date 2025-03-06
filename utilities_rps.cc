@@ -5,14 +5,14 @@
  * Description:
  *      This file is part of the Reflective Persistent System.
  *
- *      It has some utilities functions.
+ *      It has some utility functions.
  *
  * Author(s):
  *      Basile Starynkevitch <basile@starynkevitch.net>
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -666,6 +666,7 @@ rps_show_version(void)
             << " executable: " << exepath;
   if (strcmp(exepath, realexepath))
     std::cout <<  " really " << realexepath;
+  std::cout << std::endl;
 #if RPS_WITH_FLTK
   std::cout << " FLTK (see fltk.org) ABI version:" << rps_fltk_get_abi_version()
             << std::endl;
@@ -1450,6 +1451,7 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
           int pluglenam= curplugname.length();
           if (pluglenam > 4 && curplugname.substr(pluglenam-3) == ".so")
             curplugname.erase(pluglenam-3);
+          RPS_POSSIBLE_BREAKPOINT();
           RPS_DEBUG_LOG (REPL, "plugin#" << plugcnt << " is named " << Rps_QuotedC_String(curplugname));
           if (curplugname == plugname)
             {
@@ -1457,7 +1459,8 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
               break;
             };
           plugcnt++;
-        }
+        };
+      RPS_POSSIBLE_BREAKPOINT();
       if (pluginix<0)
         RPS_FATALOUT("--plugin-arg=" << plugname << ":" << plugarg
                      << " without such loaded plugin (loaded " << plugcnt << " plugins)");
@@ -1944,12 +1947,14 @@ rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argob)
                            Rps_ObjectRef oboldroot;
                            Rps_Value oldsetv;
                            Rps_Value newsetv;
+                           Rps_Value xtrav;
                 );
   _f.obconst = argob;
   RPS_DEBUG_LOG(REPL, "rps_add_constant_object start adding " << _f.obconst
                 << " of class " <<  _f.obconst->get_class()
                 << " in space " << _f.obconst->get_space() << std::endl
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object/start"));
+  RPS_POSSIBLE_BREAKPOINT();
   if (false
       || _f.obconst == RPS_ROOT_OB(_2i66FFjmS7n03HNNBx) //space∈class
       || _f.obconst == RPS_ROOT_OB(_10YXWeY7lYc01RpQTA) //the_system_class∈class
@@ -1984,6 +1989,7 @@ rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argob)
       || _f.obconst == RPS_ROOT_OB(_9Gz1oNPCnkB00I6VRS) //core_function∈class
      )
     {
+      RPS_POSSIBLE_BREAKPOINT();
       RPS_WARNOUT("cannot add core sacred root object as constant " << _f.obconst << " of class " << _f.obconst->get_class()
                   << " thread " << rps_current_pthread_name()
                   << std::endl
@@ -1991,22 +1997,35 @@ rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argob)
                  );
       return;
     };
-
+  RPS_POSSIBLE_BREAKPOINT();
   _f.obsystem = RPS_ROOT_OB(_1Io89yIORqn02SXx4p); //RefPerSys_system∈the_system_class
   std::lock_guard<std::recursive_mutex> gu(*_f.obsystem->objmtxptr());
-  _f.oldsetv = _f.obsystem->get_physical_attr
-               (RPS_ROOT_OB(_2aNcYqKwdDR01zp0Xp)); // //"constant"∈named_attribute
+  _f.oldsetv
+    = _f.obsystem->get_physical_attr (RPS_ROOT_OB(_2aNcYqKwdDR01zp0Xp)); // //"constant"∈named_attribute
   RPS_ASSERT(_f.oldsetv.is_set());
-  RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst="
-                << _f.obconst << " oldset=" << _f.oldsetv);
+  RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst="  << _f.obconst << " oldset=" << _f.oldsetv);
+  if (_f.oldsetv.as_set()->contains(_f.obconst))
+    {
+      RPS_POSSIBLE_BREAKPOINT();
+      // if the constant is already known, we issue a warning
+      RPS_WARNOUT("adding already known constant " << _f.obconst
+                  << " of class " << _f.obconst->get_class()
+                  << " in  thread " << rps_current_pthread_name()
+                  << std::endl
+                  << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object/known")
+                 );
+      return;
+    };
   RPS_POSSIBLE_BREAKPOINT();
   _f.newsetv = Rps_SetValue({_f.oldsetv, Rps_Value(_f.obconst)});
   RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst="
                 << _f.obconst << " oldset=" << _f.oldsetv
-                << " newset=" << _f.newsetv);
+                << " newset=" << _f.newsetv
+                << " obsystem=" << _f.obsystem);
   RPS_ASSERT(_f.newsetv.is_set() && _f.newsetv.as_set()->cardinal() > 0);
-  RPS_ASSERT(_f.newsetv.as_set()->cardinal() >= _f.oldsetv.as_set()->cardinal());
-  /// update the set of contants
+  RPS_ASSERT(_f.newsetv.as_set()->cardinal() > _f.oldsetv.as_set()->cardinal());
+  RPS_POSSIBLE_BREAKPOINT();
+  /// update the set of constants
   _f.obsystem->put_attr(RPS_ROOT_OB(_2aNcYqKwdDR01zp0Xp), // //"constant"∈named_attribute
                         _f.newsetv);
   RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst=" << _f.obconst
@@ -2014,6 +2033,24 @@ rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argob)
                 << std::endl
                 << "... oldfsetv=" << _f.oldsetv << " newsetv=" << _f.newsetv << " in " << _f.obsystem
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object/ending"));
+  RPS_POSSIBLE_BREAKPOINT();
+  _f.xtrav = _f.obsystem->get_physical_attr(RPS_ROOT_OB(_2aNcYqKwdDR01zp0Xp));
+  RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst=" << _f.obconst
+                << " of class " << _f.obconst->get_class() << " space " << _f.obconst->get_space()
+                << std::endl
+                << "... oldfsetv=" << _f.oldsetv
+                << std::endl << "... newsetv=" << _f.newsetv
+                << std::endl << "... xtrav=" << _f.xtrav << " " << ((_f.xtrav  == _f.newsetv)?"same":"different")
+                << " in " << _f.obsystem
+                << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object/ending2"));
+  RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst="
+                << RPS_OBJECT_DISPLAY(_f.obconst) << std::endl
+                << " obsystem=" << RPS_OBJECT_DISPLAY(_f.obsystem)
+                << std::endl << "xtrav=" << _f.xtrav
+                << " newsetv=" << _f.newsetv);
+  RPS_ASSERT(_f.xtrav  == _f.newsetv);
+  RPS_DEBUG_LOG(REPL, "rps_add_constant_object final obsystem=" << _f.obsystem);
+  RPS_POSSIBLE_BREAKPOINT();
 #pragma message "perhaps rps_add_constant_object should remove obconst from the set of roots?"
 } // end rps_add_constant_object
 
@@ -2072,7 +2109,7 @@ rps_remove_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argobcon
       return;
     };
 #pragma message "rps_remove_constant_object unimplemented"
-  RPS_FATALOUT("rps_remove_constant_object unimplemented obconst=" << _f.obconst);
+  RPS_FATALOUT("rps_remove_constant_object unimplemented obconst=" << RPS_OBJECT_DISPLAY(_f.obconst));
 } // end rps_remove_constant_object
 
 void

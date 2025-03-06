@@ -14,7 +14,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -72,6 +72,7 @@ rps_load_string_to_json(const std::string&str, const char*filnam, int lineno)
 } // end rps_load_string_to_json
 
 
+
 //////////////////////////////////////////////// loader
 class Rps_Loader
 {
@@ -127,6 +128,8 @@ public:
   };
   void load_all_state_files(void);
   void add_todo(const std::function<void(Rps_Loader*)>& todofun);
+  void set_primitive_type_size_and_align(Rps_ObjectRef primtypob,
+                                         unsigned sizeby, unsigned alignby);
   // run some todo functions, return the number of remaining ones
   int run_some_todo_functions(void);
   void load_install_roots(void);
@@ -1591,6 +1594,7 @@ void rps_load_from (const std::string& dirpath)
         RPS_DEBUG_LOG(LOAD, "rps_load_from start dirpath=" << dirpath << " after load_install_roots");
         rps_initialize_roots_after_loading(&loader);
         rps_initialize_symbols_after_loading(&loader);
+        rps_set_native_data_in_loader(&loader);
         nbloaded = loader.nb_loaded_objects();
         RPS_DEBUG_LOG(LOAD, "rps_load_from start dirpath=" << dirpath << " nbloaded=" << nbloaded);
       }
@@ -1638,7 +1642,8 @@ void rps_load_from (const std::string& dirpath)
 
 /// loading of class information payload; see
 /// Rps_PayloadClassInfo::dump_json_content in objects_rps.cc
-void rpsldpy_classinfo(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+void
+rpsldpy_classinfo(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
   RPS_ASSERT(ld != nullptr);
@@ -1723,7 +1728,8 @@ void rpsldpy_classinfo(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv,
 
 
 /// loading of vector of objects payload
-void rpsldpy_vectob(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+void
+rpsldpy_vectob(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
   RPS_ASSERT(ld != nullptr);
@@ -1750,7 +1756,8 @@ void rpsldpy_vectob(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rp
 
 
 /// loading of vector of values payload
-void rpsldpy_vectval(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+void
+rpsldpy_vectval(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
   RPS_ASSERT(ld != nullptr);
@@ -1776,7 +1783,8 @@ void rpsldpy_vectval(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, R
 } // end of rpsldpy_vectob
 
 /// loading of set of objects payload
-void rpsldpy_setob(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+void
+rpsldpy_setob(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
   RPS_ASSERT(ld != nullptr);
@@ -1803,7 +1811,8 @@ void rpsldpy_setob(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps
 
 
 /// loading of space payload
-void rpsldpy_space(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+void
+rpsldpy_space(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
   RPS_ASSERT(ld != nullptr);
@@ -1816,7 +1825,8 @@ void rpsldpy_space(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps
 
 
 /// loading of symbol payload
-void rpsldpy_symbol(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
+void
+rpsldpy_symbol(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
   RPS_ASSERT(ld != nullptr);
@@ -1840,5 +1850,45 @@ void rpsldpy_symbol(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rp
 } // end rpsldpy_symbol
 
 
+void
+Rps_Loader::set_primitive_type_size_and_align(Rps_ObjectRef primtypob,
+    unsigned sizeby, unsigned alignby)
+{
+  RPS_ASSERT(primtypob);
+  RPS_ASSERT(primtypob->is_instance_of(RPS_ROOT_OB(_1XswYkom3Jm02YR3Vi))); //cplusplus_primitive_type∈class
+  primtypob->loader_put_attr(this, rpskob_6EsfxShTuwH02waeLE, //!byte_alignment∈named_attribute
+                             Rps_Value((intptr_t)sizeby));
+  primtypob->loader_put_attr(this, rpskob_8IRzlYX53kN00tC3fG, //!byte_size∈named_attribute
+                             Rps_Value((intptr_t)alignby));
+} /* end Rps_Loader::set_primitive_type_size_and_align */
+
+
+void
+rps_set_native_data_in_loader(Rps_Loader*ld)
+{
+  RPS_ASSERT(ld != nullptr);
+  RPS_WARNOUT("incomplete rps_set_native_data_in_loader" << std::endl
+              << RPS_FULL_BACKTRACE_HERE(1, "rps_set_native_data_in_loader"));
+  /* Some loaded objects are representing machine types, and their
+     attributes _6EsfxShTuwH02waeLE !byte_alignment∈named_attribute
+     and _8IRzlYX53kN00tC3fG !byte_size∈named_attribute need to be set
+     to integers particular to this machine using alignof() and
+     sizeof() C++ macros */
+  /* TODO: use ld->set_primitive_type_size_and_align here */
+  /* all the constants below have class cplusplus_primitive_type*/
+  ld->set_primitive_type_size_and_align(rpskob_4V1oeUOvmxo041XLTm, //code_intptr_t
+                                        sizeof(intptr_t),
+                                        alignof(intptr_t)
+                                       );
+  ld->set_primitive_type_size_and_align(rpskob_4nZ0jIKUbGr01OixPV, //code_int
+                                        sizeof(int),
+                                        alignof(int)
+                                       );
+  ld->set_primitive_type_size_and_align(rpskob_3NYlqvmSuTm024LDuD, //code_long
+                                        sizeof(long),
+                                        alignof(long)
+                                       );
+#warning incomplete rps_set_native_data_in_loader
+} // end rps_set_native_data_in_loader
 
 //// end of file load_rps.cc

@@ -13,7 +13,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2021 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2021 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -960,9 +960,196 @@ rpsapply_61pgHb5KRq600RLnKD(Rps_CallFrame*callerframe, // REPL dump command
 
 
 
+void
+Rps_Object_Display::output_routine_addr(std::ostream&out, void*funaddr) const
+{
+  if (funaddr == nullptr)
+    out << "⏚"; //U+23DA EARTH GROUND
+  else if (funaddr == RPS_EMPTYSLOT) // should not happen....
+    out << "⦱"; //U+29B1 EMPTY SET WITH OVERBAR
+  else
+    {
+      Dl_info adinf;
+      memset ((void*)&adinf, 0, sizeof(adinf));
+      if (dladdr(funaddr, &adinf))
+        {
+          if (funaddr==adinf.dli_saddr)
+            {
+              out << "&" << adinf.dli_sname;
+              const char*demangled = nullptr;
+              if (adinf.dli_sname[0]=='_' && adinf.dli_sname[1])   // mangled C++ name
+                {
+                  int status = -1;
+                  demangled  = abi::__cxa_demangle(adinf.dli_sname, nullptr, 0, &status);
+                  if (demangled && status == 0 && demangled[0])
+                    out << "≡" // U+2261 IDENTICAL TO
+                        << demangled;
+                  free((void*)demangled);
+                }
+              out << "=" << funaddr;
+            }
+          else
+            {
+              size_t delta=(const char*)funaddr - (const char*)adinf.dli_saddr;
+              out << "&" << adinf.dli_sname << "+" << delta << "=" << funaddr;
+            }
+        }
+      else
+        out << "?" << funaddr;
+      if (adinf.dli_fname) /// shared object name
+        out << " in " << adinf.dli_fname;
+    };
+} // end Rps_Object_Display::output_routine_addr
 
 
+void
+rps_sort_object_vector_for_display(std::vector<Rps_ObjectRef>&vectobr)
+{
+  std::sort(vectobr.begin(), vectobr.end(),
+            [](Rps_ObjectRef leftob, Rps_ObjectRef rightob)
+  {
+    return Rps_ObjectRef::compare_for_display
+           (leftob,rightob)<0;
+  });
+} // end rps_sort_object_vector_for_display
 
+
+//// called in practice by RPS_OBJECT_DISPLAY macro
+void
+Rps_Object_Display::output_display(std::ostream&out) const
+{
+#warning incomplete Rps_Object_Display::output_display should be moved to objects_rps.cc
+  if (!_dispfile)
+    return;
+  if (!_dispobref)
+    {
+      out << "__ (*" << _dispfile << ":" << _displine << "*)" << std::endl;
+      return;
+    };
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  /// We lock the displayed object to avoid other threads modifying it
+  /// during the display.
+  std::lock_guard<std::recursive_mutex> gudispob(*_dispobref->objmtxptr());
+  out  << std::endl
+       << BOLD_esc
+       << "¤¤ showing object " << _dispobref
+       << NORM_esc
+       << std::endl << "  of class "
+       << _dispobref->get_class()
+       << std::endl
+       << " in space " << _dispobref->get_space() << std::endl;
+  double obmtim = _dispobref->get_mtime();
+  {
+    char mtimbuf[64];
+    memset (mtimbuf, 0, sizeof(mtimbuf));
+    rps_strftime_centiseconds(mtimbuf, sizeof(mtimbuf),
+                              "%Y, %b, %d %H:%M:%S.__ %Z", obmtim);
+    out   << BOLD_esc << "** mtime: " << mtimbuf
+          << "   *hash:" << _dispobref->val_hash()
+          << NORM_esc
+          << std::endl;
+  };
+  //// °°°°°°°°°°° display function pointers .....
+  rps_magicgetterfun_t* getfun = _dispobref->magic_getter_function();
+  if (getfun)
+    {
+      out << BOLD_esc << "⊚ magic attribute getter function "
+          << NORM_esc;
+      output_routine_addr(out, reinterpret_cast<void*>(getfun));
+    }
+  rps_applyingfun_t*applfun = _dispobref->applying_function();
+  if (applfun)
+    {
+      out << BOLD_esc << "⊚ applying function "
+          << NORM_esc;
+      output_routine_addr(out, reinterpret_cast<void*>(applfun));
+    }
+  //// °°°°°°°°°°° display physical attributes
+  Rps_Value setphysattr = _dispobref->set_of_physical_attributes();
+  if (setphysattr.is_empty())
+    out << BOLD_esc
+        << "** no physical attributes **"
+        << NORM_esc << std::endl;
+  else
+    {
+      RPS_ASSERT(setphysattr.is_set());
+      const Rps_SetOb*physattrset = setphysattr.as_set();
+      unsigned nbphysattr = physattrset->cardinal();
+      if (nbphysattr == 1)
+        {
+          const Rps_ObjectRef thesingleattr = physattrset->at(0);
+          RPS_ASSERT(thesingleattr);
+          const Rps_Value thesingleval = _dispobref->get_physical_attr(thesingleattr);
+          out<< BOLD_esc << "** one physical attribute **"
+             << NORM_esc << std::endl;
+          out << BOLD_esc << "*"
+              << NORM_esc << thesingleattr << ": "
+              << Rps_OutputValue(thesingleval, _dispdepth, disp_max_depth)
+              << std::endl;
+        }
+      else
+        {
+          /// TODO: we need to sort physattrset in displayable order
+          /// (alphabetically by name, else by objid), using
+          /// Rps_ObjectRef::compare_for_display
+          out<< BOLD_esc << "** "
+             << nbphysattr << " physical attributes **"
+             << NORM_esc << std::endl;
+          std::vector<Rps_ObjectRef> attrvect(nbphysattr);
+          for (int ix=0; ix<(int)nbphysattr; ix++)
+            attrvect[ix] = physattrset->at(ix);
+          rps_sort_object_vector_for_display(attrvect);
+          for (int ix=0; ix<(int)nbphysattr; ix++)
+            {
+              const Rps_ObjectRef curattr = attrvect[ix];
+              const Rps_Value curval =  _dispobref->get_physical_attr(curattr);
+              out << BOLD_esc << "*"
+                  << NORM_esc << curattr << ": "
+                  << Rps_OutputValue(curval, _dispdepth, disp_max_depth)
+                  << std::endl;
+            }
+        };
+    };
+  //// °°°°°°°°°°° display physical components
+  unsigned nbphyscomp = _dispobref->nb_physical_components();
+  if (nbphyscomp == 0)
+    {
+      out << BOLD_esc << "* no physical components *" << NORM_esc << std::endl;
+    }
+  else if (nbphyscomp == 1)
+    {
+      out << BOLD_esc << "* one physical component *" << NORM_esc << std::endl;
+    }
+  else
+    {
+      out << BOLD_esc << "* " << nbphyscomp << " physical components *"
+          << NORM_esc << std::endl;
+    }
+  const std::vector<Rps_Value> vectcomp =
+    _dispobref->vector_physical_components();
+  for (unsigned ix=0; ix<nbphyscomp; ix++)
+    {
+      out << BOLD_esc << "[" << ix << "]" << NORM_esc << " "
+          << Rps_OutputValue(vectcomp[ix], _dispdepth, disp_max_depth)
+          << std::endl;
+    };
+  Rps_Payload*payl = _dispobref->get_payload();
+  if (!payl)
+    {
+      out << BOLD_esc << "* no payload *" << NORM_esc << std::endl;
+      return;
+    }
+  out << BOLD_esc << "* " << payl->payload_type_name() << " payload *"
+      << NORM_esc << std::endl;
+  payl->output_payload(out, _dispdepth, disp_max_depth);
+} // end Rps_Object_Display::output_display
 
 
 
@@ -1006,6 +1193,7 @@ void rps_show_object_for_repl(Rps_CallFrame*callerframe,
     ontty=false;
   if (depth==0)
     {
+#warning move this code then use Rps_Object_Display::output_display near line 968 above
       (*pout)
           << std::endl << std::endl << "================================" << std::endl
           << (ontty?RPS_TERMINAL_BOLD_ESCAPE:"")

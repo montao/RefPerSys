@@ -1,7 +1,6 @@
 #!/bin/bash
-
 #
-# Copyright 2020 - 2024, Basile Starynkevitch and the forum@refpersys.org
+# Copyright 2020 - 2025, Basile Starynkevitch and the forum@refpersys.org
 # mailing list contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
@@ -38,6 +37,25 @@ if [ -z $GPP ]; then
     fi
     export GPP
 fi
+
+if [ -z $CXX ]; then
+    CXX=$(which g++)
+    if [ -z $CXX ]; then
+	printf "%s missing g++ GNU compiler\n" $0 2>&1
+	exit 1
+    fi
+    export CXX
+fi
+
+if [ -z $CARBURETTA ]; then
+    CARBURETTA=$(which carburetta)
+    if [ -z $CARBURETTA ]; then
+	printf "%s missing carburetta parser generator, see https://carburetta.com/ and github.com/kingletbv/carburetta\n" $0 2>&1
+	exit 1
+    fi
+    export CARBURETTA
+fi
+
 printf "/// invocation: %s %s in %s\n" $0 "$*" "$(realpath $(pwd))"
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
@@ -94,9 +112,15 @@ printf "const char rps_gnu_make[]=\"%s\";\n" $(/bin/which gmake)
 
 printf "const char rps_gnu_make_version[]=\"%s\";\n" "$(gmake --version | /bin/head -1)"
 
+printf "const char rps_gnu_make_features[]=\"%s\";\n" "$(gmake -s  --no-print-directory print-gmake-features)"
+
 printf "const char rps_gnu_bison[]=\"%s\";\n" $(/bin/which bison)
 
 printf "const char rps_gnu_bison_version[]=\"%s\";\n" "$(bison --version | /bin/head -1)"
+
+printf "const char rps_carburetta[]=\"%s\"; //Carburetta parser generator, see github.com/kingletbv/carburetta\n" $(/bin/which $CARBURETTA)
+
+printf "const char rps_carburetta_version[]=\"%s\";\n" "$($CARBURETTA --version | /bin/head -1)"
 
 printf "const char rps_gui_script_executable[]=\"%s\";\n" $(realpath gui-script-refpersys.sh)
 
@@ -128,9 +152,6 @@ printf "const char rps_gpp_preprocessor_realpath[]=\"%s\";\n" $(realpath $GPP)
 
 printf "const char rps_gpp_preprocessor_version[]=\"%s\";\n" "$($GPP --version | /bin/head -1)"
 
-printf "const char rps_ninja_builder[]=\"%s\";\n" "$REFPERSYS_NINJA"
-
-printf "const char rps_ninja_version[]=\"%s\";\n" "$($REFPERSYS_NINJA --version)"
 
 printf "/// see also GNUmakefile in %s for refpersys.org;\n" $PWD
 

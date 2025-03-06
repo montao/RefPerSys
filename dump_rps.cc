@@ -14,7 +14,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -37,6 +37,18 @@
 
 #include "refpersys.hh"
 
+
+/// GNU lightning implementation header.
+/// See https://www.gnu.org/software/lightning/
+
+/// a GNU lightning library after 2.2.2 (or GNU lightning commit
+/// 3b0fff9206a458d7e11db of August 21, 2023) is required.
+
+
+/// GNU lightning
+extern "C" {
+#include "lightning.h"
+};
 
 
 extern "C" const char rps_dump_gitid[];
@@ -1062,7 +1074,7 @@ Rps_Dumper::write_generated_roots_file(void)
           (*pouts) << '"' << Rps_Cjson_String(nameval.to_cppstring()) << '"';
         (*pouts) << "∈" << claclapayl->class_name_str();
       };
-    (*pouts) << std::endl;
+    (*pouts) << " h:" << obr->obhash() << std::endl;
   });
   /// output a 100 star comments to ease GNU emacs rectangle facilities
   {
@@ -1106,6 +1118,7 @@ Rps_Dumper::write_generated_names_file(void)
     (*pouts) << "RPS_INSTALL_NAMED_ROOT_OB(" << obr->oid()
              << "," << (cursym->symbol_name()) << ")"
              << " //∈" << obr->get_class()
+             << " h:" << obr->obhash()
              << std::endl;
     namecnt++;
   });
@@ -1186,7 +1199,7 @@ Rps_Dumper::write_generated_constants_file(void)
       else if (!klassname.empty())
         *pouts << " //-∈" // U+2208 ELEMENT OF
                << klassname;
-      *pouts << std::endl;
+      *pouts << " h:" << constobr->obhash() << std::endl;
       constcnt ++;
     }
   *pouts << std::endl << "#undef RPS_INSTALL_CONSTANT_OB" << std::endl << std::endl;
@@ -1376,6 +1389,15 @@ Rps_Dumper::write_generated_data_file(void)
     {
       *pouts << "#undef RPS_WITH_FLTK" << std::endl;
     }
+  /// emit a few GNU lightning constants (it is a runtime code generation
+  /// library www.gnu.org/software/lightning/ ...)
+  {
+    *pouts << "/// GNU lightning code generation constants" << std::endl
+           << "/// see www.gnu.org/software/lightning" << std::endl
+           << "#define RPS_LIGHTNING_JIT_R_NUM " << JIT_R_NUM << std::endl
+           << "#define RPS_LIGHTNING_JIT_V_NUM " << JIT_V_NUM << std::endl
+           << "#define RPS_LIGHTNING_JIT_F_NUM " << JIT_F_NUM << std::endl;
+  }
   {
     /// unless compiled with RPS_SILENT_COMPILE emit a pragma message
     *pouts << "#ifndef RPS_SILENT_COMPILE" << std::endl;
@@ -1487,7 +1509,7 @@ Rps_Dumper::write_generated_parser_decl_file(Rps_CallFrame*callfr, Rps_ObjectRef
 {
   std::lock_guard<std::recursive_mutex> gu(du_mtx);
   auto rootpathstr = std::string{"generated/rps-parser-decl.hh"};
-  RPS_DEBUG_LOG(DUMP, "dumper write_generated_parser_decl_file start");
+  RPS_DEBUG_LOG(DUMP, "dumper write_generated_parser_decl_file start genob="<<genob);
   auto pouts = open_output_file(rootpathstr);
   rps_emit_gplv3_copyright_notice(*pouts, rootpathstr,
                                   /*prefix:*/ "//:", /*suffix:*/"",
@@ -1506,7 +1528,7 @@ Rps_Dumper::write_generated_parser_impl_file(Rps_CallFrame*callfr, Rps_ObjectRef
 {
   std::lock_guard<std::recursive_mutex> gu(du_mtx);
   auto rootpathstr = std::string{"generated/rps-parser-impl.cc"};
-  RPS_DEBUG_LOG(DUMP, "dumper write_generated_parser_decl_file start");
+  RPS_DEBUG_LOG(DUMP, "dumper write_generated_parser_decl_file start genob="<<genob);
   auto pouts = open_output_file(rootpathstr);
   rps_emit_gplv3_copyright_notice(*pouts, rootpathstr,
                                   /*prefix:*/ "//:", /*suffix:*/"",
@@ -1552,6 +1574,8 @@ Rps_Dumper::write_all_generated_files(void)
       /* We create a temporary object to hold some "arbitrary"
       information about this particular generation */
       _f.genstoreob = Rps_ObjectRef::make_object(&_, Rps_ObjectRef::the_object_class());
+      std::unique_lock<std::recursive_mutex> gugenstorsob(*(_f.genstoreob->objmtxptr()));
+      /* TODO: some closure should be extracted from a root or constant object and applied to the generator object */
       RPS_DEBUG_LOG(DUMP, "Rps_Dumper::write_all_generated_files before sending "<< _f.gencodselob << " to "
                     << _f.refpersysv << " with " << _f.dumpdirnamev << " & " << _f.tempsuffixv << " genstoreob=" << _f.genstoreob
                     << std::endl
@@ -1760,7 +1784,6 @@ Rps_Dumper::write_space_file(Rps_ObjectRef spacobr)
         *pouts << "/CLASS";
       if (curobr->get_space() == RPS_ROOT_OB(_8J6vNYtP5E800eCr5q)) //"initial_space"∈space
         *pouts << "!";
-      *pouts << std::endl;
       RPS_NOPRINTOUT("Rps_Dumper::write_space_file emits " << (curobr->oid().to_string())
                      << " of hi=" <<  (curobr->oid().hi())
                      << " #" << count);
@@ -1787,11 +1810,13 @@ Rps_Dumper::write_space_file(Rps_ObjectRef spacobr)
             if (!namestr.empty() && symb)
               {
                 *pouts << "//$" << namestr << "∈" /*U+2208 ELEMENT OF*/
-                       << symb->symbol_name() << std::endl;
+                       << symb->symbol_name()
+                       << " h:" << curobr->obhash() <<  std::endl;
               }
             else if (symb)
               *pouts << "//∈" /*U+2208 ELEMENT OF*/
-                     << symb->symbol_name() << std::endl;
+                     << symb->symbol_name()
+                     << " h:" << curobr->obhash()<<  std::endl;
           }
         else
           RPS_WARNOUT("Rps_Dumper::write_space_file no obsymb for obr "
@@ -2031,6 +2056,7 @@ rpsapply_5Q5E0Lw9v4f046uAKZ(Rps_CallFrame*callerframe, /// "generate_code°the_s
                 );
   char cwdbuf[rps_path_byte_size];
   memset (cwdbuf, 0, sizeof(cwdbuf));
+  RPS_ASSERT(arg0.is_object());
   _f.sysob = arg0.as_object();
   _f.dumpstrv = arg1;
   _f.suffixstrv = arg2;
@@ -2041,20 +2067,17 @@ rpsapply_5Q5E0Lw9v4f046uAKZ(Rps_CallFrame*callerframe, /// "generate_code°the_s
     cwds = ".";
   RPS_WARNOUT("unimplemented rpsapply_5Q5E0Lw9v4f046uAKZ generate_code°the_system_class"
               << std::endl
-              << "... sysob=" << Rps_OutputValue(Rps_ObjectValue{_f.sysob},0)
+              << "... sysob=" << RPS_OBJECT_DISPLAY(_f.sysob) << std::endl
               << " dumpstr=" <<  Rps_OutputValue(_f.dumpstrv,0)
               << " suffixstr=" << Rps_OutputValue(_f.suffixstrv,0)
               << std::endl
-              << "... dumpob=" << Rps_OutputValue(Rps_ObjectValue{_f.dumpob},0)
+              << "... dumpob=" << RPS_OBJECT_DISPLAY(_f.dumpob) << std::endl
               << " closurev=" << Rps_OutputValue(_f.closurev,0)
               << std::endl
               << "... cwds=" << cwds << " pid:" << (int)getpid()
               << " from " << (rps_is_main_thread()?"main":"other")
               << " thread"
               << std::endl << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_5Q5E0Lw9v4f046uAKZ generate_code°the_system_class"));
-  // arg0 is reciever, so _1Io89yIORqn02SXx4p⟦⏵RefPerSys_system∈the_system_class⟧
-  RPS_ASSERT(arg0.is_object());
-  RPS_ASSERT(_f.sysob);
   // arg1 is the dumped directory string, e.g. ~/RefPerSys
   RPS_ASSERT(_f.dumpstrv.is_string());
   // arg2 is a temporary suffix like "_3MPAZx-p1084952%"

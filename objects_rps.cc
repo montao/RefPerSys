@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -50,7 +50,7 @@ std::recursive_mutex Rps_ObjectZone::ob_idmtx_;
 
 
 
-// build an object from its existing string oid, or else fail with C++ exception
+// Build an object from its existing string oid, or else fail with C++ exception
 Rps_ObjectRef::Rps_ObjectRef(Rps_CallFrame*callerframe, const char*oidstr, Rps_ObjIdStrTag)
 {
   if (!oidstr)
@@ -65,9 +65,84 @@ Rps_ObjectRef::Rps_ObjectRef(Rps_CallFrame*callerframe, const char*oidstr, Rps_O
   *this = find_object_or_fail_by_oid(callerframe, oid);
 } // end Rps_ObjectRef::Rps_ObjectRef(Rps_CallFrame*, constexpr const char*oidstr, Rps_ObjIdStrTag)
 
+
+/// Static member function to compare two object references for display to humans
+/// so if both have names, use them....
+int
+Rps_ObjectRef::compare_for_display(const Rps_ObjectRef leftob,
+                                   const Rps_ObjectRef rightob)
+{
+  if (leftob.optr() == rightob.optr())
+    return 0;
+  if (leftob.is_empty())
+    {
+      if (rightob.is_empty())
+        return 0;
+      return -1;
+    };
+  if (rightob.is_empty())
+    {
+      if (leftob.is_empty())
+        return 0;
+      return 1;
+    };
+  Rps_Id leftid = leftob->oid();
+  Rps_Id rightid = rightob->oid();
+  RPS_ASSERT (leftid != rightid);
+  /// these strings will hold a (non-empty) name if one is found.
+  std::string sleftname;
+  std::string srightname;
+  {
+    std::lock_guard<std::recursive_mutex> guleft(*leftob->objmtxptr());
+    Rps_Value leftvalname =
+      leftob->get_physical_attr(RPS_ROOT_OB(_1EBVGSfW2m200z18rx)); // /name∈named_attribute
+    if (leftvalname.is_string())
+      sleftname = leftvalname.as_string()->cppstring();
+  }
+  {
+    std::lock_guard<std::recursive_mutex> guright(*rightob->objmtxptr());
+    Rps_Value rightvalname =
+      rightob->get_physical_attr(RPS_ROOT_OB(_1EBVGSfW2m200z18rx)); // /name∈named_attribute
+    if (rightvalname.is_string())
+      srightname = rightvalname.as_string()->cppstring();
+  }
+  if (!sleftname.empty() && !srightname.empty())
+    {
+      if (sleftname==srightname)
+        {
+          if (leftid < rightid)
+            return -1;
+          else
+            return +1;
+        }
+      else
+        {
+          if (sleftname < srightname)
+            return -1;
+          else
+            return +1;
+        }
+    };
+  if (!sleftname.empty())
+    return -1;
+  else if (!srightname.empty())
+    return +1;
+  if (leftid < rightid)
+    return -1;
+  else
+    return +1;
+} // end of Rps_ObjectRef::compare_for_display
+
+
+
+/// Output a reference for human display
 void
 Rps_ObjectRef::output(std::ostream&outs, unsigned depth, unsigned maxdepth) const
 {
+  //// See also class Rps_Object_Display in cmdrepl_rps.cc which uses
+  //// this and the RPS_OBJECT_DISPLAY and RPS_OBJECT_DISPLAY_DEPTH
+  //// macros of refpersys.hh.
+  ////
   if (is_empty())
     outs << "__";
   else if (depth>maxdepth)
@@ -277,6 +352,7 @@ Rps_ObjectZone::~Rps_ObjectZone()
 {
   //  RPS_INFORMOUT("destroying object " << oid());
   Rps_Id curid = oid();
+  RPS_POSSIBLE_BREAKPOINT();
   clear_payload();
   ob_attrs.clear();
   ob_comps.clear();
@@ -287,6 +363,8 @@ Rps_ObjectZone::~Rps_ObjectZone()
   ob_idmap_.erase(curid);
   ob_idbucketmap_[curid.bucket_num()].erase(curid);
 } // end Rps_ObjectZone::~Rps_ObjectZone()
+
+
 
 Rps_ObjectZone::Rps_ObjectZone() :
   Rps_ObjectZone::Rps_ObjectZone(fresh_random_oid(this),
@@ -428,7 +506,7 @@ Rps_ObjectZone::remove_attr(const Rps_ObjectRef obattr)
 
 
 Rps_Value
-Rps_ObjectZone::set_of_attributes([[maybe_unused]] Rps_CallFrame*stkf) const
+Rps_ObjectZone::set_of_physical_attributes(void) const
 {
   RPS_ASSERT(stored_type() == Rps_Type::Object);
   std::lock_guard<std::recursive_mutex> gu(ob_mtx);
@@ -438,15 +516,32 @@ Rps_ObjectZone::set_of_attributes([[maybe_unused]] Rps_CallFrame*stkf) const
   for (auto it : ob_attrs)
     vecat.push_back(it.first);
   return Rps_SetValue(vecat);
+} // end of Rps_ObjectZone::set_of_physical_attributes
+
+
+
+Rps_Value
+Rps_ObjectZone::set_of_attributes([[maybe_unused]] Rps_CallFrame*stkf) const
+{
+  RPS_ASSERT(stored_type() == Rps_Type::Object);
+  RPS_ASSERT(!stkf || stkf->is_good_call_frame());
+  return set_of_physical_attributes();
 } // end of Rps_ObjectZone::set_of_attributes
 
+unsigned
+Rps_ObjectZone::nb_physical_attributes(void) const
+{
+  RPS_ASSERT(stored_type() == Rps_Type::Object);
+  std::lock_guard<std::recursive_mutex> gu(ob_mtx);
+  return ob_attrs.size();
+} // end Rps_ObjectZone::nb_physical_attributes
 
 unsigned
 Rps_ObjectZone::nb_attributes([[maybe_unused]] Rps_CallFrame*stkf) const
 {
+  RPS_ASSERT(!stkf || stkf->is_good_call_frame());
   std::lock_guard<std::recursive_mutex> gu(ob_mtx);
-  unsigned nbat = ob_attrs.size();
-  return nbat;
+  return ob_attrs.size();
 } // end Rps_ObjectZone::nb_attributes
 
 Rps_Value
@@ -538,11 +633,22 @@ Rps_ObjectZone::put_attr(const Rps_ObjectRef obattr, const Rps_Value valattr)
                                   << " in " << Rps_ObjectRef(this));
   }
   std::lock_guard gu(ob_mtx);
+#warning debug stuff in ObjectZone::put_attr is temporary in end of jan 2025
+  RPS_POSSIBLE_BREAKPOINT();
+  RPS_DEBUG_LOG(REPL, "Rps_ObjectZone::put_attr/start *this="
+                <<  Rps_ObjectRef(this) << std::endl
+                << " obattr=" << obattr << " valattr=" << valattr
+                << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "Rps_ObjectZone::put_attr")
+                << RPS_OBJECT_DISPLAY(this));
+  RPS_POSSIBLE_BREAKPOINT();
   if (valattr.is_empty())
     ob_attrs.erase(obattr);
   else
-    ob_attrs.insert({obattr, valattr});
+    ob_attrs.insert_or_assign(obattr, valattr);
   ob_mtime.store(rps_wallclock_real_time());
+  RPS_DEBUG_LOG(REPL, "Rps_ObjectZone::put_attr/end"
+                << RPS_OBJECT_DISPLAY(this));
 } // end Rps_ObjectZone::put_attr
 
 
@@ -571,11 +677,11 @@ Rps_ObjectZone::put_attr2(const Rps_ObjectRef obattr0, const Rps_Value valattr0,
   if (valattr0.is_empty())
     ob_attrs.erase(obattr0);
   else
-    ob_attrs.insert({obattr0, valattr0});
+    ob_attrs.insert_or_assign(obattr0, valattr0);
   if (valattr1.is_empty())
     ob_attrs.erase(obattr1);
   else
-    ob_attrs.insert({obattr1, valattr1});
+    ob_attrs.insert_or_assign(obattr1, valattr1);
   ob_mtime.store(rps_wallclock_real_time());
 } // end Rps_ObjectZone::put_attr2
 
@@ -613,15 +719,15 @@ Rps_ObjectZone::put_attr3(const Rps_ObjectRef obattr0, const Rps_Value valattr0,
   if (valattr0.is_empty())
     ob_attrs.erase(obattr0);
   else
-    ob_attrs.insert({obattr0, valattr0});
+    ob_attrs.insert_or_assign(obattr0, valattr0);
   if (valattr1.is_empty())
     ob_attrs.erase(obattr1);
   else
-    ob_attrs.insert({obattr1, valattr1});
+    ob_attrs.insert_or_assign(obattr1, valattr1);
   if (valattr2.is_empty())
     ob_attrs.erase(obattr2);
   else
-    ob_attrs.insert({obattr2, valattr2});
+    ob_attrs.insert_or_assign(obattr2, valattr2);
   ob_mtime.store(rps_wallclock_real_time());
 } // end Rps_ObjectZone::put_attr3
 
@@ -669,19 +775,19 @@ Rps_ObjectZone::put_attr4(const Rps_ObjectRef obattr0, const Rps_Value valattr0,
   if (valattr0.is_empty())
     ob_attrs.erase(obattr0);
   else
-    ob_attrs.insert({obattr0, valattr0});
+    ob_attrs.insert_or_assign(obattr0, valattr0);
   if (valattr1.is_empty())
     ob_attrs.erase(obattr1);
   else
-    ob_attrs.insert({obattr1, valattr1});
+    ob_attrs.insert_or_assign(obattr1, valattr1);
   if (valattr2.is_empty())
     ob_attrs.erase(obattr2);
   else
-    ob_attrs.insert({obattr2, valattr2});
+    ob_attrs.insert_or_assign(obattr2, valattr2);
   if (valattr3.is_empty())
     ob_attrs.erase(obattr3);
   else
-    ob_attrs.insert({obattr3, valattr3});
+    ob_attrs.insert_or_assign(obattr3, valattr3);
   ob_mtime.store(rps_wallclock_real_time());
 } // end Rps_ObjectZone::put_attr4
 
@@ -709,7 +815,7 @@ Rps_ObjectZone::exchange_attr(const Rps_ObjectRef obattr, const Rps_Value valatt
   if (valattr.is_empty())
     ob_attrs.erase(obattr);
   else
-    ob_attrs.insert({obattr, valattr});
+    ob_attrs.insert_or_assign(obattr, valattr);
   if (poldval)
     *poldval = oldval;
   ob_mtime.store(rps_wallclock_real_time());
@@ -755,11 +861,11 @@ Rps_ObjectZone::exchange_attr2(const Rps_ObjectRef obattr0, const Rps_Value vala
   if (valattr0.is_empty())
     ob_attrs.erase(obattr0);
   else
-    ob_attrs.insert({obattr0, valattr0});
+    ob_attrs.insert_or_assign(obattr0, valattr0);
   if (valattr1.is_empty())
     ob_attrs.erase(obattr1);
   else
-    ob_attrs.insert({obattr1, valattr1});
+    ob_attrs.insert_or_assign(obattr1, valattr1);
   if (poldval0)
     *poldval0 = oldval0;
   if (poldval1)
@@ -822,15 +928,15 @@ Rps_ObjectZone::exchange_attr3(const Rps_ObjectRef obattr0, const Rps_Value vala
   if (valattr0.is_empty())
     ob_attrs.erase(obattr0);
   else
-    ob_attrs.insert({obattr0, valattr0});
+    ob_attrs.insert_or_assign(obattr0, valattr0);
   if (valattr1.is_empty())
     ob_attrs.erase(obattr1);
   else
-    ob_attrs.insert({obattr1, valattr1});
+    ob_attrs.insert_or_assign(obattr1, valattr1);
   if (valattr2.is_empty())
     ob_attrs.erase(obattr2);
   else
-    ob_attrs.insert({obattr2, valattr2});
+    ob_attrs.insert_or_assign(obattr2, valattr2);
   if (poldval0)
     *poldval0 = oldval0;
   if (poldval1)
@@ -912,19 +1018,19 @@ Rps_ObjectZone::exchange_attr4(const Rps_ObjectRef obattr0, const Rps_Value vala
   if (valattr0.is_empty())
     ob_attrs.erase(obattr0);
   else
-    ob_attrs.insert({obattr0, valattr0});
+    ob_attrs.insert_or_assign(obattr0, valattr0);
   if (valattr1.is_empty())
     ob_attrs.erase(obattr1);
   else
-    ob_attrs.insert({obattr1, valattr1});
+    ob_attrs.insert_or_assign(obattr1, valattr1);
   if (valattr2.is_empty())
     ob_attrs.erase(obattr2);
   else
-    ob_attrs.insert({obattr2, valattr2});
+    ob_attrs.insert_or_assign(obattr2, valattr2);
   if (valattr3.is_empty())
     ob_attrs.erase(obattr3);
   else
-    ob_attrs.insert({obattr3, valattr3});
+    ob_attrs.insert_or_assign(obattr3, valattr3);
   if (poldval0)
     *poldval0 = oldval0;
   if (poldval1)
@@ -939,6 +1045,20 @@ Rps_ObjectZone::exchange_attr4(const Rps_ObjectRef obattr0, const Rps_Value vala
 
 
 //////////////// components
+unsigned
+Rps_ObjectZone::nb_physical_components(void) const
+{
+  std::lock_guard<std::recursive_mutex> gu(ob_mtx);
+  return ob_comps.size();
+} // end Rps_ObjectZone::nb_physical_components
+
+const std::vector<Rps_Value>
+Rps_ObjectZone::vector_physical_components(void) const
+{
+  std::lock_guard<std::recursive_mutex> gu(ob_mtx);
+  return ob_comps;
+} // end Rps_ObjectZone::vector_physical_components
+
 unsigned
 Rps_ObjectZone::nb_components([[maybe_unused]] Rps_CallFrame*stkf) const
 {
@@ -1562,6 +1682,105 @@ Rps_PayloadClassInfo::compute_set_of_own_method_selectors(Rps_CallFrame*callerfr
 } // end Rps_PayloadClassInfo::compute_set_of_own_method_selectors
 
 
+void
+Rps_PayloadClassInfo::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> guown(*(owner()->objmtxptr()));
+  out << std::endl
+      << BOLD_esc << "¤¤ class information payload ¤¤"
+      << NORM_esc << std::endl;
+  out << "*super-class:" << pclass_super << std::endl;
+  out << "*symbol name:" << pclass_symbname << std::endl;
+  /// show the method dictionary
+  size_t nbmethod = pclass_methdict.size();
+  if (nbmethod==0)
+    out << BOLD_esc << "*no own method*" << NORM_esc << std::endl;
+  else
+    {
+      std::vector<Rps_ObjectRef> selvect(nbmethod);
+      for (auto it: pclass_methdict)
+        {
+          RPS_ASSERT(it.first);
+          selvect.push_back(it.first);
+        };
+      if (nbmethod==1)
+        {
+          out << BOLD_esc << "*one own method*" << NORM_esc << std::endl;
+          Rps_ObjectRef thesel = selvect[0];
+          auto theit = pclass_methdict.find(thesel);
+          RPS_ASSERT(theit != pclass_methdict.end());
+          const Rps_ClosureValue theclos = theit->second;
+          RPS_ASSERT(theclos.is_closure());
+          out << BOLD_esc << "°" << NORM_esc << thesel
+              << BOLD_esc << "→" // U+2192 RIGHTWARDS ARROW
+              << NORM_esc << " ";
+          out << Rps_OutputValue(theclos, depth+1, maxdepth) << std::endl;
+        }
+      else
+        {
+          out << BOLD_esc << "*" << nbmethod << " own methods*"
+              << NORM_esc << std::endl;
+          rps_sort_object_vector_for_display(selvect);
+          for (int ix=0; ix<(int)nbmethod; ix++)
+            {
+              Rps_ObjectRef cursel = selvect[ix];
+              auto curit = pclass_methdict.find(cursel);
+              RPS_ASSERT(curit != pclass_methdict.end());
+              const Rps_ClosureValue curclos = curit->second;
+              RPS_ASSERT(curclos.is_closure());
+              out << BOLD_esc << "°" << NORM_esc << cursel
+                  << BOLD_esc << "→" // U+2192 RIGHTWARDS ARROW
+                  << NORM_esc << " ";
+              out << Rps_OutputValue(curclos, depth+1, maxdepth) << std::endl;
+            }
+        }
+    } // end if nbmethod not 0
+  /// show the attribute set (for classes of instances)
+  {
+    const Rps_SetOb* setattr = pclass_attrset.load();
+    if (setattr != nullptr)
+      {
+        size_t nbattrset = setattr->cardinal();
+        if (nbattrset>0)
+          {
+            if (nbattrset==1)
+              out << BOLD_esc << "* one attribute set *" << NORM_esc
+                  << std::endl;
+            else
+              out << BOLD_esc << "* " << nbattrset << " attributes set *"
+                  << NORM_esc << std::endl;
+            std::vector<Rps_ObjectRef> attrvect(nbattrset);
+            for (auto atit : *setattr)
+              {
+                attrvect.push_back(*atit);
+              };
+            rps_sort_object_vector_for_display(attrvect);
+            for (int ix=0; ix<(int)nbattrset; ix++)
+              {
+                Rps_ObjectRef obattr = attrvect[ix];
+                RPS_ASSERT(obattr);
+                out << BOLD_esc << "[!" << ix << "!]" << NORM_esc
+                    << " " << obattr << std::endl;
+              }
+          }
+        else
+          out << BOLD_esc << "* no attribute set *" << NORM_esc
+              << std::endl;
+      }
+  }
+} // end Rps_PayloadClassInfo::output_payload
+
+
+
+
 
 
 /***************** mutable set of objects payload **********/
@@ -1639,6 +1858,57 @@ Rps_PayloadSetOb::make_mutable_set_object(Rps_CallFrame*callerframe,
 } // end Rps_PayloadSetOb::make_mutable_set_object
 
 
+void
+Rps_PayloadSetOb::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> guown(*(owner()->objmtxptr()));
+  unsigned setcard = cardinal();
+  if (setcard==0)
+    {
+      out << BOLD_esc << "¤¤ empty set object payload ¤¤" << NORM_esc
+          << std::endl;
+      return;
+    }
+  std::vector<Rps_ObjectRef> vectelem(setcard);
+  for (auto setit: psetob)
+    {
+      Rps_ObjectRef curob = *setit;
+      RPS_ASSERT(curob);
+      vectelem.push_back(curob);
+    };
+  if (setcard==1)
+    out << BOLD_esc << "¤¤ singleton set object payload ¤¤" << NORM_esc
+        << std::endl;
+  else
+    {
+      rps_sort_object_vector_for_display(vectelem);
+      out << BOLD_esc << "¤¤ set object payload of "
+          << setcard << " elements" << NORM_esc << std::endl;
+    };
+  for (int ix=0; ix<(int)setcard; ix++)
+    {
+      Rps_ObjectRef obelem = vectelem[ix];
+      RPS_ASSERT(obelem);
+      out << BOLD_esc << "[." << ix << ".]" << NORM_esc
+          << " " << obelem << std::endl;
+    };
+} // end of Rps_PayloadSetOb::output_payload
+
+
+
+
+
+
+
+
 /***************** mutable vector of objects payload **********/
 
 void
@@ -1671,6 +1941,53 @@ Rps_PayloadVectOb::dump_json_content(Rps_Dumper*du, Json::Value&jv) const
       jarr.append(Json::Value(Json::nullValue));
   jv["vectob"] = jarr;
 } // end Rps_PayloadVectOb::dump_json_content
+
+void
+Rps_PayloadVectOb::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> guown(*(owner()->objmtxptr()));
+  unsigned vectsiz = size();
+  if (vectsiz == 0)
+    {
+      out << BOLD_esc << "* empty object vector payload *" << NORM_esc << std::endl;
+      return;
+    }
+  std::vector<Rps_ObjectRef> vectcomp(vectsiz);
+  for (auto vectit: pvectob)
+    {
+      Rps_ObjectRef curob = *vectit;
+      RPS_ASSERT(curob);
+      vectcomp.push_back(curob);
+    };
+  if (vectsiz == 1)
+    {
+      out << BOLD_esc << "* singleton object vector payload *"
+          << NORM_esc << std::endl;
+    }
+  else
+    {
+      out << BOLD_esc << "* vector of " << vectsiz << " objects payload *"
+          << NORM_esc << std::endl;
+    };
+  for (unsigned ix=0; ix<vectsiz; ix++)
+    {
+      Rps_ObjectRef obcomp = vectcomp[ix];
+      RPS_ASSERT(obcomp);
+      out << BOLD_esc << "[" << ix << "]" << NORM_esc
+          << " ";
+      obcomp.output(out, depth+1, maxdepth);
+      out << std::endl;
+    }
+} // end of Rps_PayloadVectOb::output_payload
+
 
 /***************** mutable vector of values payload **********/
 
@@ -1730,6 +2047,23 @@ Rps_PayloadVectVal::make_instance_zone_from_vector(Rps_ObjectRef classob)
   return Rps_InstanceZone::make_from_components(classob, pvectval);
 } // end Rps_PayloadVectVal::make_instance_zone_from_vector
 
+void
+Rps_PayloadVectVal::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> guown(*(owner()->objmtxptr()));
+#warning incomplete Rps_PayloadVectVal::output_payload
+} // end of Rps_PayloadVectVal::output_payload
+
+
+
 /***************** space payload **********/
 
 void
@@ -1745,6 +2079,23 @@ Rps_PayloadSpace::dump_json_content(Rps_Dumper*du, Json::Value&jv) const
   RPS_ASSERT(jv.type() == Json::objectValue);
 } // end Rps_PayloadSpace::dump_json_content
 
+void
+Rps_PayloadSpace::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  RPS_ASSERT(depth <= maxdepth);
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  if (owner() == Rps_ObjectRef::root_space())
+    out << BOLD_esc << "** root space payload **" << NORM_esc << std::endl;
+  else
+    out << BOLD_esc << "** space payload **" << NORM_esc << std::endl;
+} // end Rps_PayloadSpace::output_payload
 
 /***************** symbol payload **********/
 
@@ -1985,7 +2336,28 @@ Rps_PayloadSymbol::set_of_all_symbols(void)
 } // end Rps_PayloadSymbol::set_of_all_symbols
 
 
+void
+Rps_PayloadSymbol::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  RPS_ASSERT(depth <= maxdepth);
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  out << "*" << BOLD_esc << (is_weak()?"weak":"strong")
+      << " symbol named " << symbol_name() << NORM_esc
+      << " of value ";
+  symbol_value().output(out, depth, maxdepth);
+  out << " " << BOLD_esc << "*" << NORM_esc << std::endl;
+} // end Rps_PayloadSymbol::output_payload
 
+
+
+////////////////////////////////////////////////////////////////
 Rps_ObjectRef
 Rps_ObjectRef::find_object_by_string(Rps_CallFrame*callerframe, const std::string& str, Rps_ObjectRef::Find_Behavior_en behav)
 {
