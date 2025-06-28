@@ -1,12 +1,12 @@
 #!/bin/bash
-#
-# Copyright 2020 - 2025, Basile Starynkevitch and the forum@refpersys.org
-# mailing list contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# This file is part of the Reflexive Persistent System (aka RefPerSys);
-# it just emits a string with the full git commit id, appending + if
-# the git status is not clean.
+# © Copyright (C) 2020 - 2025, Basile Starynkevitch and the
+# forum@refpersys.org mailing list contributors
+#
+# This file rps-generate-timestamp.sh is part of the Reflexive
+# Persistent System (aka RefPerSys); it just emits a string with the
+# full git commit id, appending + if the git status is not clean.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -152,6 +152,9 @@ printf "const char rps_gpp_preprocessor_realpath[]=\"%s\";\n" $(realpath $GPP)
 
 printf "const char rps_gpp_preprocessor_version[]=\"%s\";\n" "$($GPP --version | /bin/head -1)"
 
+printf "const char rps_linking_command[]={\n"
+make -n refpersys | awk '/Linking RefPerSys/{doecho=1;}/Linked RefPerSys/{doecho=0;}{if (doecho) print;}' -;
+printf "0}; // end rps_linking_command\n"
 
 printf "/// see also GNUmakefile in %s for refpersys.org;\n" $PWD
 

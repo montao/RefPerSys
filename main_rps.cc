@@ -13,7 +13,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2024 The Reflective Persistent System Team
+ *      © Copyright 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -46,6 +46,16 @@ const char rps_main_shortgitid[]= RPS_SHORTGITID;
 
 extern "C" char rps_buffer_proc_version[];
 char rps_buffer_proc_version[rps_path_byte_size];
+
+#pragma message "Compiling " __FILE__ " on operating system " RPS_OPERSYS " for architecture " RPS_ARCH
+
+#if RPS_HAS_OPERSYS_GNU_Linux
+#pragma message "Compiling " __FILE__ " on GNU/Linux"
+#endif
+
+#if RPS_HAS_ARCH_86_64
+#pragma message "Compiling " __FILE__ " for 64 bits x86"
+#endif
 
 struct utsname rps_utsname;
 
@@ -83,6 +93,12 @@ rps_incremented_debug_counter(void)
 {
   return 1+rps_debug_atomic_counter.fetch_add(1);
 } // end rps_incremented_debug_counter
+
+long
+rps_debug_counter(void)
+{
+  return rps_debug_atomic_counter.load();
+} // end rps_debug_counter
 
 static void rps_kill_wait_gui_process(void);
 
@@ -283,8 +299,8 @@ struct argp_option rps_progoptions[] =
     /*key:*/ RPSPROGOPT_PREFERENCES_HELP, ///
     /*arg:*/ nullptr, ///
     /*flags:*/ 0, ///
-    /*doc:*/ "After loading heap and plugins, show help about ...\n"
-    "user preferences (given in the preferences file)\n"
+    /*doc:*/ "After loading heap and plugins, show help \n"
+    "about user preferences (given in the preferences file)\n"
     , //
     /*group:*/0 ///
   },
@@ -338,7 +354,7 @@ struct argp_option rps_progoptions[] =
     /*arg:*/ "RUNDELAY", ///
     /*flags:*/ 0, ///
     /*doc:*/ "Run RefPerSys agenda and event loop for a limited real time,\n"
-    " e.g. --run-delay=50s or --run-delay=2m or --run-delay=5h\n", ///
+    " e.g. --run-delay=50s or --run-delay=2m or --run-delay=5h\n\n", ///
     /*group:*/0 ///
   },
   /* ======= run a shell command with system(3) after load ======= */
@@ -401,7 +417,8 @@ struct argp_option rps_progoptions[] =
     /*key:*/ RPSPROGOPT_TYPEINFO, ///
     /*arg:*/ nullptr, ///
     /*flags:*/ 0, ///
-    /*doc:*/ "Show type information (and test tagged integers).\n", //
+    /*doc:*/ "Show type information (and test tagged integers).\n" //
+    " (using rps_print_types_info from utilities_rps.cc)\n",
     /*group:*/0 ///
   },
   /* ======= pid-file ======= */
@@ -417,15 +434,15 @@ struct argp_option rps_progoptions[] =
     /*key:*/ RPSPROGOPT_USER_PREFERENCES, ///
     /*arg:*/ "USER_PREF", ///
     /*flags:*/ 0, ///
-    /*doc:*/ "Set the user preferences to given file USER_PREF;\n"
-    "Lines starting with # are comments.\n"
+    /*doc:*/ "Set the user preferences to given\n"
+    "USER_PREF file; Lines there starting with # are comments.\n"
     "Lines before the first *REFPERSYS_USER_PREFERENCES are ignored.\n"
     "\t So they could be some shell script....\n"
     "See also --preferences-help option.\n"
-    "\n"
     "The format is en.wikipedia.org/wiki/INI_file with named values...\n"
-    "The preferences file has sections starting with [secname]\n"
-    "Others are <name>=<value>, e.g. color='black' or height=345 ...\n"
+    "The preferences file has sections starting\n"
+    "with [secname]. Others are <name>=<value>, e.g.\n"
+    " color='black' or height=345 ...\n"
     "\nDefault preference file is"
     " $HOME/" REFPERSYS_DEFAULT_PREFERENCE_PATH "\n"
     , //
@@ -919,7 +936,9 @@ rps_edit_run_cplusplus_code (Rps_CallFrame*callerframe)
       RPS_INFORMOUT("rps_edit_run_cplusplus_code should compile C++ code in " << tempcppfilename
                     << std::endl
                     << " - from "
-                    << Rps_ShowCallFrame(&_));
+                    << RPS_FULL_BACKTRACE_HERE(1,
+                        "rps_edit_run_cplusplus_code")
+                    << std::endl);
       std::string cwdpath;
       bool needchdir = false;
       {
@@ -933,19 +952,22 @@ rps_edit_run_cplusplus_code (Rps_CallFrame*callerframe)
       }
       needchdir = cwdpath != std::string{};
       //// our compilation command is...
-      std::string buildplugincmd{rps_topdirectory};
-      buildplugincmd += "/do-build-refpersys-plugin ";
-      buildplugincmd += tempcppfilename;
-      buildplugincmd += " -o ";
-      buildplugincmd += tempsofilename;
-      RPS_WARNOUT("rps_edit_run_cplusplus_code incomplete for C++ code in "<< tempcppfilename
-                  << " should compile into " << tempsofilename
-                  << " using either make plugin or do-build-refpersys-plugin"
-                  << std::endl
-                  << " - from "
-                  << Rps_ShowCallFrame(&_)
-                  << std::endl
-                  << RPS_FULL_BACKTRACE_HERE(1, "rps_edit_run_cplusplus_code *incomplete*"));
+      std::string buildplugincmd;
+      buildplugincmd.reserve(140);
+      if (needchdir)
+        {
+          buildplugincmd += "cd '";
+          buildplugincmd += Rps_QuotedC_String(rps_topdirectory);
+          buildplugincmd += "' && ";
+        };
+      buildplugincmd += rps_gnu_make;
+      buildplugincmd += " one-plugin ";
+      buildplugincmd += "REFPERSYS_PLUGIN_SOURCE='";
+      buildplugincmd += Rps_QuotedC_String(tempcppfilename);
+      buildplugincmd += "' ";
+      buildplugincmd += "REFPERSYS_PLUGIN_SHARED_OBJECT='";
+      buildplugincmd += Rps_QuotedC_String(tempsofilename);
+      buildplugincmd += "'\n";
       errno= 0;
       if (needchdir)
         {
@@ -1464,10 +1486,11 @@ rps_locale(void)
 int
 main (int argc, char** argv)
 {
-  char*mylocale = nullptr;
   rps_progname = argv[0];
+  char*mylocale = nullptr;
   bool helpwanted = false;
   bool versionwanted = false;
+  _Pragma("message \"start of main\"");
   if (argc>1 && !strcmp(argv[1], "--help"))
     helpwanted = true;
   if (argc>1 && !strcmp(argv[1], "--version"))

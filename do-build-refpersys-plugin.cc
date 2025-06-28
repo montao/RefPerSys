@@ -10,12 +10,13 @@
 /// Purpose: build a plugin for RefPerSys
 ///
 /// Caveat: this do-build-refpersys-plugin program should run quickly
-/// and uses ninja from ninja-build.org. It could leak memory.
+/// and uses GNU make or ninja from ninja-build.org.  It could leak
+/// memory.
 ///
 /// invocation: do-build-refpersys-plugin <plugin-c++-source> -o <plugin-shared-object>
 /// e.g. do-build-refpersys-plugin plugins_dir/foo.cc -o /tmp/foo.so
 /// other program options are:
-/// 	./do-build-refpersys-plugin --version | -V #give also defaults
+///   ./do-build-refpersys-plugin --version | -V #give also defaults
 ///     ./do-build-refpersys-plugin --verbose | -v #verbose execution
 ///     ./do-build-refpersys-plugin --output=PLUGIN | -o PLUGIN #output generated .so
 ///     ./do-build-refpersys-plugin --dirobj=OBJ_DIR | -d OBJ_DIR #directory for object files
@@ -58,11 +59,20 @@
 #include <libgen.h>
 
 
+//// www.gnu.org/software/guile/ version 3
+#include <libguile.h>
 ///
 #define BP_HEAD_LINES_THRESHOLD 512
 #define BP_MAX_OPTIONS 32
 
+/// a macro to ease GDB breakpoint
+#define BP_NOP_BREAKPOINT() do {asm volatile ("nop; nop");} while(0)
+
+#pragma message "compiling " __FILE__
+
 #warning perhaps replace pkg-config with "https://github.com/pkgconf/pkgconf"
+
+#warning fix issue #24 on github.com/RefPerSys/RefPerSys
 
 extern "C" {
 #include "__timestamp.c"
@@ -74,6 +84,7 @@ extern "C" {
   const char** bp_env_prog;
   const char* bp_plugin_binary; // generated shared object
   std::string bp_srcdir;  // plugin source directory
+  void bp_initialize_guile_scheme(void);
 #warning bp_srcdir plugin source directory incompletely handled
   // if only once C++ source given set bp_srcdir to its dirname
   std::string bp_objdir; // plugin object directory
@@ -174,12 +185,12 @@ bp_usage(void)
   std::cout << '\t' << bp_progname << " --plugin-src=DIRNAME | -s DIRNAME #plugin source directory" << std::endl;
   std::cout << '\t' << bp_progname << " --guile=GUILE_CODE | -G GUILE_CODE #GUILE code for GNU make" << std::endl;
   std::cout << '\t' << bp_spaces << "if GUILE_CODE starts with a left-paren, space or semicolon, it is passed to the interpreter inside make"
-	    << std::endl;
+            << std::endl;
   std::cout << '\t' << bp_spaces << "if GUILE_CODE starts with a pipe or exclamation, it is popen-ed"
-	    << std::endl;
+            << std::endl;
   std::cout << '\t' << bp_spaces << "otherwise GUILE_CODE is a file with GNU Guile Scheme code"
-	    << std::endl;
-  
+            << std::endl;
+
   std::cout << '\t' << bp_progname << " --help | -h #this help" << std::endl;
   std::cout << "\t #from " << __FILE__ << ':' << __LINE__ << " git " << bp_git_id << std::endl;
   std::cout << "\t #see refpersys.org and github.com/RefPerSys/RefPerSys" << std::endl;
@@ -200,7 +211,7 @@ bp_prog_options(int argc, char**argv)
   int ix= 0;
   do
     {
-      opt = getopt_long(argc, argv, "Vhvs:o:N:S:d:", bp_options_ptr, &ix);
+      opt = getopt_long(argc, argv, "Vhvs:o:N:S:d:G:", bp_options_ptr, &ix);
       if (ix >= argc)
         break;
       switch (opt)
@@ -264,7 +275,7 @@ bp_prog_options(int argc, char**argv)
               if (!S_ISDIR(dirstat.st_mode))
                 {
                   std::cerr << bp_progname
-                            << " : specified plugin soursr directory " << optarg
+                            << " : specified plugin source directory " << optarg
                             << " is not a directory." << std::endl;
                   exit(EXIT_FAILURE);
                 };
@@ -330,11 +341,27 @@ bp_prog_options(int argc, char**argv)
           fflush(nullptr);
         }
         break;
-	case 'G': // --guile GUILECODE
-	  {
-#warning GUILECODE not handled
-	  }
-	  break;
+        case 'G': // --guile GUILECODE
+        {
+          if (bp_verbose)
+            {
+              printf("%s is running GUILE Scheme code %s [%s:%d]\n",
+                     bp_progname, optarg,  __FILE__, __LINE__-1);
+            }
+          fflush(nullptr);
+	  /// https://lists.gnu.org/archive/html/guile-user/2025-05/msg00005.html
+          SCM guilexp = scm_c_read_string(optarg);
+          SCM resguile = scm_primitive_eval(guilexp);
+          fflush(nullptr);
+          if (bp_verbose)
+            {
+              char*strguile = scm_to_utf8_string(resguile);
+              printf("%s evaluated GUILE code %s as %s [%s:%d]\n",
+                     bp_progname, optarg, strguile,  __FILE__, __LINE__-1);
+            };
+          fflush(nullptr);
+        }
+        break;
         } // end switch opt
     }
   while (opt > 0 && ix < argc);
@@ -363,13 +390,21 @@ bp_prog_options(int argc, char**argv)
               exit(EXIT_FAILURE);
             };
         }
-      if (bp_verbose)
-        {
-          printf("%s adding plugin C++ source file#%d %s\n",
-                 bp_progname, srcix, curarg.c_str());
-          fflush(nullptr);
-        };
-      bp_vect_cpp_sources.push_back(curarg);
+      {
+        std::string realfile;
+        char*rp = realpath(curarg.c_str(),nullptr);
+        if (rp) realfile.assign(rp);
+        else
+          realfile = curarg;
+        if (bp_verbose)
+          {
+            printf("%s adding plugin C++ source file#%d %s really %s\n",
+                   bp_progname, srcix, curarg.c_str(), realfile.c_str());
+            fflush(nullptr);
+          };
+        bp_vect_cpp_sources.push_back(realfile);
+        /// dont bother freeing rp....
+      }
       optind++;
     };        // end while(optind<argc)
   asm volatile ("nop; nop; nop; nop");
@@ -406,20 +441,58 @@ bp_prog_options(int argc, char**argv)
 } // end bp_prog_options
 
 
+/// by convention Scheme primitives for GNU guile are prefixed by bpscm
+static SCM
+bpscm_false0(void)
+{
+  //// just in case to use the breakpoint below from GDB
+  BP_NOP_BREAKPOINT();
+  return SCM_BOOL_F;
+} // end bpscm_false0
+
+static SCM
+bpscm_false1(void)
+{
+  //// just in case to use the breakpoint below from GDB
+  BP_NOP_BREAKPOINT();
+  return SCM_BOOL_F;
+} // end bpscm_false1
+
+static SCM
+bpscm_git_id(void)
+{
+  BP_NOP_BREAKPOINT();
+  return scm_from_utf8_string(bp_git_id);
+} // end bpscm_git_id
+
+void
+bp_initialize_guile_scheme(void)
+{
+  scm_c_define_gsubr ("bpscm:false0", /*nbreq:*/0, /*nbopt:*/0, /*nbrest:*/0,
+                      (scm_t_subr)bpscm_false0);
+  scm_c_define_gsubr ("bpscm:false1", /*nbreq:*/0, /*nbopt:*/0, /*nbrest:*/0,
+                      (scm_t_subr)bpscm_false1);
+  scm_c_define_gsubr ("bpscm:git_id", /*nbreq:*/0, /*nbopt:*/0, /*nbrest:*/0,
+                      (scm_t_subr)bpscm_git_id);
+} // end bp_initialize_guile_scheme
 
 ////////////////////////////////////////////////////////////////
 int
 main(int argc, char**argv, const char**env)
 {
-  bp_options_ptr = bp_options_arr;
-  std::string bp_first_base;
-#warning do-build-refpersys-plugin should be much improved
-  ///TODO to accept secondary source files for the plugin and more
-  ///program options and improve GNUmakefile
   bp_progname = argv[0];
   bp_argc_prog = argc;
   bp_argv_prog = argv;
   bp_env_prog = env;
+  bp_options_ptr = bp_options_arr;
+  scm_init_guile();
+  bp_initialize_guile_scheme();
+  BP_NOP_BREAKPOINT();
+  std::string bp_first_base;
+#warning do-build-refpersys-plugin should be much improved and fixed
+
+  ///TODO to accept secondary source files for the plugin and more
+  ///program options and improve GNUmakefile
   memset (bp_hostname, 0, sizeof(bp_hostname));
   gethostname(bp_hostname, sizeof(bp_hostname)-1);
   char symlkbuf[384];
@@ -445,6 +518,12 @@ main(int argc, char**argv, const char**env)
       bp_verbose = true;
     };
   bp_prog_options(argc, argv);
+  if (chdir(rps_topdirectory))
+    {
+      std::clog << bp_progname << " failed to chdir " << rps_topdirectory
+                << " : " << strerror(errno) << std::endl;
+      exit(EXIT_FAILURE);
+    };
   asm volatile ("nop; nop; nop; nop");
   if (bp_verbose)
     {
@@ -493,24 +572,27 @@ main(int argc, char**argv, const char**env)
   {
     char buildcmd[384];
     memset (buildcmd, 0, sizeof(buildcmd));
+    BP_NOP_BREAKPOINT();
     if (bp_verbose)
       snprintf (buildcmd, sizeof(buildcmd), "%s -v -C %s %s",
-                rps_plugin_builder,
+                rps_gnu_make,
                 rps_topdirectory,
                 bp_plugin_binary);
     else
       snprintf (buildcmd, sizeof(buildcmd), "%s -C %s %s",
-                rps_plugin_builder,
+                rps_gnu_make,
                 rps_topdirectory,
                 bp_plugin_binary);
-    printf("%s [%s:%d] running gmake as \n  %s"
+    printf("%s [%s:%d] running GNU make in %s as \n  %s"
            "\n (plugin binary %s, %d sources starting with %s)\n",
            bp_progname,
            __FILE__, __LINE__-2,
+	   rps_topdirectory,
            buildcmd,  bp_plugin_binary,
            (int)bp_vect_cpp_sources.size(),
            bp_vect_cpp_sources.at(0).c_str());
     fflush (nullptr);
+    BP_NOP_BREAKPOINT();
     int ex = system(buildcmd);
     sync ();
     if (ex)
@@ -518,29 +600,30 @@ main(int argc, char**argv, const char**env)
   }
   /// temporary files should be removed using at(1) utility in ten minutes
   /// see https://linuxize.com/post/at-command-in-linux/
-  {
-    char atcmd[80];
-    memset (atcmd, 0, sizeof(atcmd));
-    snprintf(atcmd, sizeof(atcmd), "/bin/at now + 10 minutes");
-    FILE *p = popen(atcmd, "w");
-    if (!p)
-      {
-        fprintf(stderr, "%s won't remove later file %s\n",
-                bp_progname, bp_temp_ninja.c_str());
-        return 0;
-      }
-    fprintf (p, "/bin/rm -f '%s'\n", bp_temp_ninja.c_str());
-    if (symlkbuf[0])
-      fprintf(p, "/bin/rm -f '%s'\n", symlkbuf);
-    pclose(p);
-  }
-  if (bp_verbose)
+  if (!bp_temp_ninja.empty() || symlkbuf[0])
     {
-      printf("%s: will remove ninja temporary script %s in ten minutes thru /bin/at\n",
-             bp_progname, bp_temp_ninja.c_str());
+      char atcmd[80];
+      memset (atcmd, 0, sizeof(atcmd));
+      snprintf(atcmd, sizeof(atcmd), "/bin/at now + 10 minutes");
+      FILE *p = popen(atcmd, "w");
+      if (!p)
+        {
+          fprintf(stderr, "%s won't remove later file %s\n",
+                  bp_progname, bp_temp_ninja.c_str());
+          return 0;
+        }
+      fprintf (p, "/bin/rm -f '%s'\n", bp_temp_ninja.c_str());
       if (symlkbuf[0])
-        printf("%s: will remove symlink %s in ten minutes thru /bin/at\n",
-               bp_progname, symlkbuf);
+        fprintf(p, "/bin/rm -f '%s'\n", symlkbuf);
+      pclose(p);
+      if (bp_verbose)
+        {
+          printf("%s: will remove ninja temporary script %s in ten minutes thru /bin/at\n",
+                 bp_progname, bp_temp_ninja.c_str());
+          if (symlkbuf[0])
+            printf("%s: will remove symlink %s in ten minutes thru /bin/at\n",
+                   bp_progname, symlkbuf);
+        }
     }
   fflush(nullptr);
   bp_options_ptr = nullptr;
@@ -554,6 +637,6 @@ main(int argc, char**argv, const char**env)
 /****************
  **                           for Emacs...
  ** Local Variables: ;;
- ** compile-command: "make do-build-refpersys-plugin" ;;
+ ** compile-command: "cd $RPS_TOPDIR && make do-build-refpersys-plugin" ;;
  ** End: ;;
  ****************/

@@ -11,7 +11,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2023 The Reflective Persistent System Team
+ *      © Copyright (C) 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -122,6 +122,18 @@ std::ostream& operator << (std::ostream& out, const Rps_Id id)
 } // end output of Rps_Id
 
 
+static inline
+std::ostream& operator << (std::ostream& out, const Rps_ObjectVector vec)
+{
+  out << "vectob.l"<< vec.size() << "(";
+  size_t sz = (unsigned)vec.size();
+  for (std::size_t ix=0; ix<sz; ix++) {
+    if (ix>0) out << ", ";
+    out << vec[ix];
+  }
+  out << ")";
+  return out;
+}
 
 //////////////////////////////////////////////////////////// values
 Rps_Value::Rps_Value() : _wptr(nullptr) {};
@@ -1749,7 +1761,7 @@ Rps_ObjectZone::is_subclass_of(Rps_ObjectRef obsuperclass) const
       obcurclass = curclasspayl->superclass();
       RPS_DEBUG_LOG(LOW_REPL, "!Rps_ObjectZone::is_subclass_of again call#" << curcallcnt << " this=" << Rps_ObjectRef(this)
                     << " obsuperclass=" << obsuperclass << " cnt#" << cnt << std::endl
-                    << "... obinitclass=" << obinitclass << " obthisclass=" << obthisclass
+                    << "… obinitclass=" << obinitclass << " obthisclass=" << obthisclass
                     << " obcurclass becomes " << obcurclass);
     }
 } // end Rps_ObjectZone::is_superclass_of

@@ -11,7 +11,7 @@
  *      Abhishek Chakravarti, India    <abhishek@taranjali.org>
  *      Nimesh Neema, India            <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2025 The Reflective Persistent System Team
+ *      © Copyright (C) 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * You can consider RefPerSys as either GPLv3+ or LGPLv3+ licensed (at
@@ -385,12 +385,13 @@ extern "C" const char rps_carburetta[];
 extern "C" const char rps_carburetta_version[];
 
 
-/// subdirectoris
+/// subdirectories
 extern "C" const char*const rps_subdirectories[];
 
-/// realpath and version of the GNU C++ compiler see gcc.gnu.org
+/// realpath and version and flags of the GNU C++ compiler see gcc.gnu.org
 extern "C" const char rps_cxx_compiler_realpath[];
 extern "C" const char rps_cxx_compiler_version[];
+extern "C" const char rps_cxx_compiler_flags[];
 
 /// the GPP generic preprocessor from logological.org/gpp
 /// we may in 2025 not need to use it
@@ -541,7 +542,7 @@ extern "C" std::string rps_my_load_dir;
 
 
 
-/// the initial copyright year of RefPerSys
+/// the initial copy-right year of RefPerSys
 #define RPS_INITIAL_COPYRIGHT_YEAR 2019
 // the number of jobs, that is of threads, to run in parallel
 extern "C" int rps_nbjobs;
@@ -642,6 +643,7 @@ extern "C" void rps_fatal_stop_at (const char *, int) __attribute__((noreturn));
 
 
 extern "C" long rps_incremented_debug_counter(void);
+extern "C" long rps_debug_counter(void);
 
 extern "C" void rps_debug_warn_at(const char*file, int line);
 #define RPS_WARN_AT_BIS(Fil,Lin,Fmt,...) do {                   \
@@ -874,10 +876,11 @@ void rps_set_debug_output_path(const char*filepath);
 /// rps_set_debug_output_path ....; if fline is negative, print a
 /// newline before....
 void
-rps_debug_printf_at(const char *fname, int fline,const char*funcname, Rps_Debug dbgopt,
+rps_debug_printf_at(const char *fname, int fline, const char*funcname, Rps_Debug dbgopt,
                     const char *fmt, ...)
 __attribute__ ((format (printf, 5, 6)));
 
+#warning we may want to define a std::ostream subclass for the debugging stream (with a singleton)
 
 #define RPS_DEBUG_PRINTF_AT(fname, fline, dbgopt, fmt, ...)    \
 do                                                             \
@@ -1247,12 +1250,22 @@ rps_timer_cpu_elapsed(const rps_timer *hnd)
 /* the debugger could put a breakpoint, or we could overwrite the
    binary executable code with a call; don't forget to flush the
    caches! */
-#define RPS_POSSIBLE_BREAKPOINT() do { \
-  asm volatile ("nop; nop; nop; nop; nop; nop; nop; nop;\n" \
-                "nop; nop; nop; nop; nop; nop; nop; nop;\n" \
-                "nop; nop; nop; nop; nop; nop; nop; nop;\n" \
-); } while(0)
 
+#ifndef RPS_BASENAME
+#error RPS_BASENAME should be a string and is needed here
+#endif
+
+#define RPS_POSSIBLE_BREAKPOINT_AT(Fil,Lin) do {    \
+    asm volatile ("nop; nop; nop; nop; nop; nop; nop; nop;\n"); \
+    asm volatile ("__" RPS_BASENAME "_brk_" #Lin ": nop\n");    \
+    asm volatile ("nop; nop; nop; nop; nop; nop; nop; nop;\n"); \
+    asm volatile ("nop; nop; nop; nop; nop; nop; nop; nop;\n"); \
+ } while(0)
+
+#define RPS_POSSIBLE_BREAKPOINT_AT_BIS(Fil,Lin) \
+  RPS_POSSIBLE_BREAKPOINT_AT(Fil,Lin)
+
+#define RPS_POSSIBLE_BREAKPOINT() RPS_POSSIBLE_BREAKPOINT_AT_BIS(__FILE__,__LINE__)
 ///////////////////////////////////////////////////////////////////////////////
 
 extern "C" const char* rps_hostname(void);
@@ -1526,6 +1539,7 @@ static_assert(sizeof(Rps_ObjectRef) == sizeof(void*),
 static_assert(alignof(Rps_ObjectRef) == alignof(void*),
               "Rps_ObjectRef should have the alignment of a word");
 
+typedef std::vector<Rps_ObjectRef>  Rps_ObjectVector;
 
 class Rps_Object_Display /// use it only with RPS_OBJECT_DISPLAY.... macros
 {
@@ -1539,7 +1553,7 @@ public:
   Rps_Object_Display() : _dispobref(nullptr), _dispfile(nullptr), _displine(0), _dispdepth(0) {};
   Rps_Object_Display(const Rps_ObjectRef obr, int depth, const char*file, int line)
     : _dispobref(obr), _dispfile(file), _displine(line),
-      _dispdepth(disp_default_depth) {};
+      _dispdepth(depth) {};
   Rps_Object_Display(const Rps_ObjectRef obr, const char*file, int line)
     : _dispobref(obr), _dispfile(file), _displine(line),
       _dispdepth(disp_default_depth) {};
@@ -2361,6 +2375,10 @@ std::ostream& operator << (std::ostream& out, const Rps_Backtracer& rpb)
   Rps_Backtracer(Rps_Backtracer::FullOut_Tag{},__FILE__,__LINE__,(Skip),(Name),(std::ostream*)nullptr)
 
 ////////////////////////////////////////////////////// garbage collector
+
+extern "C" void rps_forbid_garbage_collection(void);
+extern "C" void rps_allow_garbage_collection(void);
+
 /* Our top level function to call the garbage collector; the optional
    argument C++ std::function is marking more local data, e.g. calling
    Rps_ObjectRef::gc_mark or Rps_Value::gc_mark or some
@@ -2833,6 +2851,11 @@ extern "C" void rps_do_one_repl_command(Rps_CallFrame*callframe, Rps_ObjectRef o
                                         const char*title=nullptr);
 
 
+extern "C" void rps_initialize_carburetta_after_load(Rps_Loader*);
+
+extern "C" void rps_do_carburetta_command(Rps_CallFrame*callerframe, Rps_ObjectRef obenvarg, Rps_TokenSource*tksrc);
+extern "C" void rps_do_carburetta_tokensrc(Rps_CallFrame*callerframe, Rps_ObjectRef obenvarg,
+    Rps_TokenSource*tksrc);
 
 
 ////////////////////////////////// token sources are for lexing
@@ -2845,10 +2868,11 @@ class Rps_TokenSource           // this is *not* a value .....
                           Rps_ObjectRef obenvarg,
                           const std::string&cmd,
                           const char*title);
-  std::string toksrc_name;
-  int toksrc_line, toksrc_col;
-  int toksrc_counter;
-  static Rps_TokenSource* toksrc_current_;
+  std::string toksrc_name;	// displayable name
+  int toksrc_line, toksrc_col;	// current position
+  int toksrc_counter;		// count the number of lexed token
+  const unsigned toksrc_number;	// unique number
+  static std::atomic<unsigned> toksrc_instance_count_;
 protected:
   /// could be called by subclasses
   void really_gc_mark(Rps_GarbageCollector&gc, unsigned depth);
@@ -2879,10 +2903,6 @@ protected:
   Rps_Value get_delimiter(Rps_CallFrame*callframe);
 public:
   static constexpr unsigned max_gc_depth = 128;
-  static Rps_TokenSource* current_token_source(void)
-  {
-    return toksrc_current_;
-  };
   const char*curcptr(void) const
   {
     if (toksrc_linebuf.empty())
@@ -2896,6 +2916,10 @@ public:
   {
     return toksrc_linebuf;
   };
+  unsigned unique_number(void) const
+  {
+    return toksrc_number;
+  }
   const Rps_LexTokenZone* make_token(Rps_CallFrame*callframe,
                                      Rps_ObjectRef lexkind, Rps_Value lexval, const Rps_String*sourcev);
   virtual ~Rps_TokenSource();
@@ -3001,7 +3025,7 @@ public:
   /// return, when successful, a larger expression. It accepts fields
   /// and message sending.
   Rps_Value parse_primary_complement(Rps_CallFrame*callframe, Rps_Value primaryexp, bool*pokparse=nullptr);
-#warning other recursive descent parsing routines are needed, with a syntax documented in doc/repl.md
+#pragma message "other recursive descent parsing routines are needed, with a syntax documented in doc/repl.md"
   ///////
   int line(void) const
   {
@@ -3013,6 +3037,14 @@ public:
   };
   /// on lexical error, get_token returns null and does not change the position
   Rps_LexTokenValue get_token(Rps_CallFrame*callframe);
+private:
+  Rps_LexTokenValue get__number__token(Rps_CallFrame*callframe, const char*curp);
+  Rps_LexTokenValue get__infinity__token(Rps_CallFrame*callframe, const char*curp);
+  Rps_LexTokenValue get__namoid__token(Rps_CallFrame*callframe, const char*curp);
+  Rps_LexTokenValue get__shortstr__token(Rps_CallFrame*callframe, const char*curp);
+  Rps_LexTokenValue get__longlitstr__token(Rps_CallFrame*callframe, const char*curp);
+  Rps_LexTokenValue get__codechunk__token(Rps_CallFrame*callframe, const char*curp);
+  Rps_LexTokenValue get__delim__token(Rps_CallFrame*callframe, const char*curp);
 };                              // end Rps_TokenSource
 
 inline std::ostream& operator << (std::ostream&out, Rps_TokenSource& toksrc)
@@ -3029,7 +3061,8 @@ public:
     if (depth > maxdepth && &out != &std::cout && &out != &std::cerr && &out != &std::clog)
       RPS_WARNOUT("Rps_CinTokenSource " << name()
                   << " depth=" << depth << " greater than maxdepth=" << maxdepth);
-    out << "CinTokenSource" << name() << '@' << position_str() << " tok.cnt:" << token_count();
+    out << "CinTokenSource:" << name() << ".S#" << unique_number()
+	<< '@' << position_str() << " tok.cnt:" << token_count();
   };
   Rps_CinTokenSource();
   virtual ~Rps_CinTokenSource();
@@ -3056,7 +3089,7 @@ public:
 };             // end Rps_StreamTokenSource
 
 
-
+////////////////
 class Rps_StringTokenSource : public Rps_TokenSource
 {
   std::istringstream toksrcstr_inp;
@@ -3071,7 +3104,7 @@ public:
     return toksrcstr_str;
   };
   virtual void display(std::ostream&out) const;
-};                                                            // end Rps_StringTokenSource
+};          // end Rps_StringTokenSource
 
 class Rps_MemoryFileTokenSource;
 extern "C" void rps_parse_user_preferences(Rps_MemoryFileTokenSource*);
@@ -4318,7 +4351,7 @@ typedef Rps_ProtoCallFrame Rps_CallFrame;
 typedef void Rps_CallFrameOutputSig_t(std::ostream&/*out*/, const Rps_ProtoCallFrame*/*frame*/,unsigned/*depth*/,unsigned /*maxdepth*/);
 ////////////////////////////////////////////////////////////////
 //// the common superclass of our call frames
-class Rps_ProtoCallFrame : public Rps_TypedZone
+class Rps_ProtoCallFrame : public Rps_TypedZone /// actually Rps_CallFrame
 {
   friend unsigned rps_call_frame_depth(const Rps_CallFrame*);
 protected:
@@ -5215,7 +5248,8 @@ public:
 
 
 extern "C" rpsldpysig_t rpsldpy_objmap;
-// Rps_PayloadObjMap contains a std::map of objects to values.
+// Rps_PayloadObjMap contains a std::map of objects to values and a
+// descriptive value and is subclassed by Rps_PayloadEnvironment
 class Rps_PayloadObjMap : public Rps_Payload
 {
   std::map<Rps_ObjectRef,Rps_Value> obm_map;
@@ -5249,6 +5283,10 @@ protected:
     return false;
   };
 public:
+  size_t get_obmap_size() const
+  {
+    return obm_map.size();
+  };
   virtual const std::string payload_type_name(void) const
   {
     return "objmap";
@@ -5272,6 +5310,15 @@ public:
   {
     obm_descr = d;
   };
+  template <typename Data_t>
+  void do_each_obmap_entry(Data_t tpd, std::function<bool(Data_t, Rps_ObjectRef,Rps_Value,void*)>fun, void*clientdata=nullptr) const
+  {
+    for (auto it: obm_map)
+      {
+        if (fun(tpd, it.first, it.second, clientdata))
+          break;
+      }
+  }; ///-end templated do_each_obmap_entry
   void do_each_entry(Rps_CallFrame*cf, std::function<bool(Rps_CallFrame*,Rps_ObjectRef,Rps_Value,void*)> f,
                      void* clientdata=nullptr) const
   {
@@ -5281,7 +5328,7 @@ public:
           break;
       }
   };
-  //virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
 };                              // end Rps_PayloadObjMap
 
 
@@ -5320,6 +5367,11 @@ extern "C" int rps_environment_remove_deep_binding(Rps_CallFrame*callframe,
     Rps_ObjectRef*penvob=nullptr,
     Rps_Value*poldval=nullptr);
 
+
+
+
+
+
 class Rps_PayloadEnvironment : public Rps_PayloadObjMap
 {
   Rps_ObjectRef env_parent;
@@ -5353,6 +5405,7 @@ public:
   {
     return "environment";
   };
+  virtual void output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const;
   inline Rps_PayloadEnvironment(Rps_ObjectZone*obz, Rps_Loader*ld);
   static Rps_ObjectZone* make(Rps_CallFrame*cf, Rps_ObjectRef classob=nullptr, Rps_ObjectRef spaceob=nullptr);
   static Rps_ObjectZone* make_with_parent_environment(Rps_CallFrame*cf,
@@ -5365,7 +5418,7 @@ public:
     return  env_parent;
   };
   void put_parent_environment(Rps_ObjectRef envob);
-#warning Rps_PayloadEnvironment not fully implemented
+#pragma message "Rps_PayloadEnvironment not fully implemented"
 };                              // end Rps_PayloadEnvironment
 
 
@@ -5837,7 +5890,7 @@ class Rps_PayloadUnixProcess : public Rps_Payload
   static std::mutex mtx_of_runnable_processes;
   friend Rps_PayloadUnixProcess*
   Rps_QuasiZone::rps_allocate1<Rps_PayloadUnixProcess,Rps_ObjectZone*>(Rps_ObjectZone*);
-#warning Rps_PayloadUnixProcess may need cooperation with agenda.
+#pragma message "Rps_PayloadUnixProcess may need cooperation with agenda."
   /*** TODO:
    *
    *   Perhaps we need a field containing a Rps_ClosureValue to handle
@@ -5892,7 +5945,7 @@ public:
   // set the output closure, should be called before forking ie before
   // start_process.
   void put_output_closure(Rps_ClosureValue);
-#warning missing member functions related to output pipe...
+#pragma message "missing member functions related to output pipe..."
   /// fork the process
   void start_process(Rps_CallFrame*callframe);
   static void gc_mark_active_processes(Rps_GarbageCollector&);
@@ -5965,6 +6018,11 @@ extern "C" void rps_postpone_garbage_collection(void);
 extern "C" void rps_postpone_quit(void);
 extern "C" void rps_postpone_exit_with_dump(void);
 extern "C" void rps_postpone_child_process(void);
+
+////////////////////////////////////////////////////////////////
+struct rpscarbrepl_stack;
+extern "C" const size_t rpscarbrepl_stack_size;
+extern "C" const size_t rpscarbrepl_stack_align;
 
 //////////////////////////////////////////////////////////////////
 /// C++ code can refer to root objects

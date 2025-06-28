@@ -8,11 +8,11 @@
  *      It has some utility functions.
  *
  * Author(s):
- *      Basile Starynkevitch <basile@starynkevitch.net>
+ *      Basile Starynkevitch (France) <basile@starynkevitch.net>
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2019 - 2025 The Reflective Persistent System Team
+ *      © Copyright (C) 2019 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -57,7 +57,7 @@
 #endif // RPS_WITH_FLTK
 
 #include "glib.h"
-#include "libgccjit++.h"
+#include "libgccjit.h"
 
 extern "C" const char rps_utilities_gitid[];
 const char rps_utilities_gitid[]= RPS_GITID;
@@ -321,7 +321,7 @@ rps_emit_gplv3_copyright_notice_AT(std::ostream&outs, //
     struct tm nowtm = {};
     localtime_r(&nowtime, &nowtm);
     outs << linprefix
-         << "Copyright (C) "
+         << " © " "Copyright " "(C) "
          << RPS_INITIAL_COPYRIGHT_YEAR
          << " - "
          << (nowtm.tm_year + 1900) << " "
@@ -397,7 +397,7 @@ rps_emit_lgplv3_copyright_notice_AT(std::ostream&outs,//
     struct tm nowtm = {};
     localtime_r(&nowtime, &nowtm);
     outs << linprefix
-         << "Copyright (C) "
+         << "© " "Copyright" " (C) "
          << RPS_INITIAL_COPYRIGHT_YEAR
          << " - "
          << (nowtm.tm_year + 1900)
@@ -449,7 +449,7 @@ rps_emit_lgplv3_copyright_notice_AT(std::ostream&outs,//
 void
 rps_print_types_info(void)
 {
-#define TYPEFMT_rps "%-58s:"
+#define TYPEFMT_rps "%-62s:"
   printf(TYPEFMT_rps "   size  align   (bytes)\n", "**TYPE**");
   /////
 #define EXPLAIN_TYPE(Ty) printf(TYPEFMT_rps " %5d %5d\n", #Ty,  \
@@ -473,6 +473,8 @@ rps_print_types_info(void)
    "," #Ty4,                                    \
    (int)sizeof(Ty1,Ty2,Ty3,Ty4),                \
    (int)alignof(Ty1,Ty2,Ty3,Ty4))
+#define EXPLAIN_TYPE_ABSTRACT(Ty,Siz,Ali) printf(TYPEFMT_rps " %5d %5d\n", #Ty, \
+                                                 (int)(Siz), (int)(Ali))
   /////
   EXPLAIN_TYPE(int);
   EXPLAIN_TYPE(double);
@@ -498,7 +500,7 @@ rps_print_types_info(void)
   EXPLAIN_TYPE(std::set<std::string>);
   EXPLAIN_TYPE2(std::map<Rps_ObjectRef, Rps_Value>);
   EXPLAIN_TYPE2(std::unordered_map<std::string, Rps_ObjectRef*>);
-  printf("#### %s:%d\n", __FILE__, __LINE__);
+  printf("########################## %s:%d\n", __FILE__, __LINE__);
   EXPLAIN_TYPE3(std::unordered_map<Rps_Id,Rps_ObjectZone*,Rps_Id::Hasher>);
   EXPLAIN_TYPE3(std::variant<unsigned, std::function<Rps_Value(void*)>,
                 std::function<int(void*,Rps_ObjectRef)>>);
@@ -527,6 +529,7 @@ rps_print_types_info(void)
   EXPLAIN_TYPE(Rps_Type);
   EXPLAIN_TYPE(Rps_Value);
   EXPLAIN_TYPE(Rps_ZoneValue);
+  EXPLAIN_TYPE_ABSTRACT(rpscarbrepl_stack,rpscarbrepl_stack_size,rpscarbrepl_stack_align);
   ////
 #if RPS_WITH_FLTK
   printf("\n\n===== FLTK widgets from %s:%d ====\n", __FILE__, __LINE__);
@@ -551,17 +554,38 @@ rps_print_types_info(void)
   std::cout << "@@°°@@ The tagged integer one hundred is "
             << Rps_Value::make_tagged_int(100)
             << std::endl
-            << "... and the tagged integer minus one billion is "
+            << "… and the tagged integer minus one billion is "
             <<  Rps_Value::make_tagged_int(-1000000000)
             << " !!! " << std::endl;
 } // end rps_print_types_info
 
 
-static void
-rps_show_version_handwritten_cplusplus_files(void)
+
+
+
+////////////////////////////////////////////////////////////////
+extern "C" void rps_show_version_handwritten_source_files(void);
+
+static void rps_show_version_one_source_file(const char*curfile, int curfilno, char curbase[], char cursuffix[], int& nbshownfiles, bool&nl);
+
+void
+rps_show_version_handwritten_source_files(void)
 {
+  RPS_POSSIBLE_BREAKPOINT();
+  int nbsourcefiles =0;
+  int nbshownfiles =0;
+  bool nl= false;
+  for (const char*const*curfileptr = rps_files;
+       curfileptr && *curfileptr; curfileptr++)
+    nbsourcefiles++;
+  RPS_INFORMOUT("showing versions of " << nbsourcefiles
+                << " handwritten source files (git " << rps_utilities_shortgitid
+                << ")");
+  RPS_DEBUG_LOG(PROGARG, "starting " << std::endl
+                << RPS_FULL_BACKTRACE_HERE(1, "rps_show_version_handwritten_source_files/start"));
   //// show gitid and date of individual handwritten *cc files, using dlsym
   //// since every file like utilities_rps.cc has rps_utilities_gitid and rps_utilities_date
+  int curfilno=0;
   for (const char*const*curfileptr = rps_files;
        curfileptr && *curfileptr; curfileptr++)
     {
@@ -571,62 +595,129 @@ rps_show_version_handwritten_cplusplus_files(void)
       const char*curfile = *curfileptr;
       if (!curfile)
         break;
+      RPS_POSSIBLE_BREAKPOINT();
+      curfilno++;
+      char cursuffix[16];
+      memset (cursuffix, 0, sizeof(cursuffix));
+      RPS_DEBUG_LOG(PROGARG, "curfile#" << curfilno << " =" << Rps_Cjson_String(curfile));
       if (!isalpha(curfile[0]))
         continue;
       if (strchr(curfile, '/'))
         continue;
-      if ((sscanf(curfile, "%60[a-zA-Z]_rps.cc%n", curbase, &endpos))<1
+      if ((sscanf(curfile, "%60[a-zA-Z_].%10[a-z]%n", curbase, cursuffix, &endpos))<1
           || endpos<2 || curfile[endpos]!=(char)0)
         continue;
-      const char* symgit = nullptr;
-      const char* symdat = nullptr;
-      const char* symshortgit = nullptr;
-      {
-        char cursymgit[80];
-        char cursymdat[80];
-        char cursymshortgit[80];
-        memset (cursymgit, 0, sizeof(cursymgit));
-        memset (cursymdat, 0, sizeof(cursymdat));
-        memset (cursymshortgit, 0, sizeof(cursymshortgit));
-        snprintf (cursymgit, sizeof(cursymgit), "rps_%s_gitid", curbase);
-        snprintf (cursymshortgit, sizeof(cursymgit), "rps_%s_shortgitid", curbase);
-        snprintf (cursymdat, sizeof(cursymdat), "rps_%s_date", curbase);
-        symgit = (const char*)dlsym(rps_proghdl, cursymgit);
-        if (!symgit || !isalnum(symgit[0]))
-          continue;
-        symshortgit = (const char*)dlsym(rps_proghdl, cursymshortgit);
-        if (!symshortgit || !isalnum(symgit[0]))
-          continue;
-        symdat = (const char*)dlsym(rps_proghdl, cursymdat);
-        if (!symdat || !isalnum(symdat[0]))
-          continue;
-        if (symgit && symshortgit
-            && strncmp(symgit, symshortgit, sizeof(rps_utilities_shortgitid)-2))
-          {
-            /// this should not happen and is likely a bug in C++ files or build procedure
-            RPS_POSSIBLE_BREAKPOINT();
-            RPS_WARNOUT("perhaps corrupted " << curfile << " in topdir " << rps_topdirectory
-                        << " with " << cursymgit << "=" << symgit
-                        << " and " << cursymshortgit << "=" << symshortgit);
-          }
-      };
-      if (symgit && isalnum(symgit[0]) && symdat && isalnum(symdat[0]))
-        {
-          char msgbuf[80];
-          memset (msgbuf, 0, sizeof(msgbuf));
-          if (snprintf(msgbuf, sizeof(msgbuf)-1, "%-20s git %.15s built %s",
-                       curfile, symgit, symdat)>0)
-            std::cout << "#" << msgbuf << std::endl;
-        }
+      rps_show_version_one_source_file(curfile, curfilno, curbase, cursuffix, nbshownfiles, nl);
+    };        // end major loop of rps_show_version_handwritten_source_files
+  ////
+  ////
+  if (!nl)
+    std::cout << std::endl;
+} // end rps_show_version_handwritten_source_files
+
+void
+rps_show_version_one_source_file(const char*curfile, int curfilno, char curbase[], char cursuffix[], int &nbshownfiles, bool&nl)
+{
+  RPS_DEBUG_LOG(PROGARG, "curfile#" << curfilno << " =" << Rps_Cjson_String(curfile)
+                << " curbase=" <<  Rps_Cjson_String(curbase));
+  int lencurbase=strlen(curbase);
+  /// Human written source files (not scripts) are *_rps.* and dont start with underscores.
+  if (curbase[0]=='_' || lencurbase<6)
+    {
+      /// by convention basenames starting with an underscore are generated
+      RPS_DEBUG_LOG(PROGARG, "curfile#" << curfilno<< " =" << Rps_Cjson_String(curfile)
+                    << " skipping curbase=" << Rps_Cjson_String(curbase));
+      return;
     }
-} // end rps_show_version_handwritten_cplusplus_files
+  RPS_POSSIBLE_BREAKPOINT();
+  // Human written source files are *_rps.* (except for refperys.hh)
+  if (!strcmp(curbase+lencurbase-4, "_rps"))
+    {
+      curbase[lencurbase-4]=(char)0;
+      RPS_DEBUG_LOG(PROGARG, "curfile#" << curfilno << " =" << Rps_Cjson_String(curfile)
+                    << " shrinked curbase=" << Rps_Cjson_String(curbase));
+      RPS_POSSIBLE_BREAKPOINT();
+    }
+  RPS_DEBUG_LOG(PROGARG, "curfile#" << curfilno << " =" << Rps_Cjson_String(curfile)
+                << " curbase=" << Rps_Cjson_String(curbase)
+                << " testing cursuffix=" << Rps_Cjson_String(cursuffix));
+  if (!strcmp(cursuffix, "so") || !strcmp(cursuffix, "o") || !strcmp(cursuffix, "a")
+      || !strcmp(cursuffix, "la") || !strcmp(cursuffix, "status"))
+    {
+      RPS_POSSIBLE_BREAKPOINT();
+      RPS_DEBUG_LOG(PROGARG, "curfile=" << Rps_Cjson_String(curfile)
+                    << " skipped cursuffix=" << Rps_Cjson_String(cursuffix));
+      return;
+    };
+  RPS_POSSIBLE_BREAKPOINT();
+  ////
+  RPS_DEBUG_LOG(PROGARG, "before µdlsyming curfile=" << Rps_Cjson_String(curfile)
+                << " curbase=" << Rps_Cjson_String(curbase));
+  const char* symgit = nullptr;
+  const char* symdat = nullptr;
+  const char* symshortgit = nullptr;
+  {
+    char cursymgit[80];
+    char cursymdat[80];
+    char cursymshortgit[80];
+    memset (cursymgit, 0, sizeof(cursymgit));
+    memset (cursymdat, 0, sizeof(cursymdat));
+    memset (cursymshortgit, 0, sizeof(cursymshortgit));
+    snprintf (cursymgit, sizeof(cursymgit), "rps_%s_gitid", curbase);
+    snprintf (cursymshortgit, sizeof(cursymgit), "rps_%s_shortgitid", curbase);
+    snprintf (cursymdat, sizeof(cursymdat), "rps_%s_date", curbase);
+    RPS_DEBUG_LOG(PROGARG, "before µdlsym cursymgit=" << cursymgit);
+    symgit = (const char*)dlsym(rps_proghdl, cursymgit);
+    if (!symgit)
+      {
+        RPS_WARNOUT("µdlsym cursymgit=" << cursymgit << " failed "
+                    << dlerror());
+        return;
+      }
+    RPS_DEBUG_LOG(PROGARG, "µdlsym cursymgit=" << cursymgit
+                  << " gives symgit=" << Rps_Cjson_String(symgit));
+    if (!symgit || !isalnum(symgit[0]))
+      {
+        return;
+      }
+    symshortgit = (const char*)dlsym(rps_proghdl, cursymshortgit);
+    if (!symshortgit || !isalnum(symshortgit[0]))
+      return;
+    symdat = (const char*)dlsym(rps_proghdl, cursymdat);
+    if (!symdat || !isalnum(symdat[0]))
+      return;
+    if (symgit && symshortgit
+        && strncmp(symgit, symshortgit, sizeof(rps_utilities_shortgitid)-2))
+      {
+        /// this should not happen and is likely a bug in C++ files or build procedure
+        RPS_POSSIBLE_BREAKPOINT();
+        RPS_WARNOUT("perhaps corrupted " << curfile << " in topdir " << rps_topdirectory
+                    << " with " << cursymgit << "=" << symgit
+                    << " and " << cursymshortgit << "=" << symshortgit);
+      }
+  };
+  if (symgit && isalnum(symgit[0]) && symdat && isalnum(symdat[0]))
+    {
+      char msgbuf[80];
+      memset (msgbuf, 0, sizeof(msgbuf));
+      nbshownfiles++;
+      if (snprintf(msgbuf, sizeof(msgbuf)-1, "%-16s git %.12s built %s",
+                   curfile, symgit, symdat)>0)
+        std::cout << "#" << msgbuf << std::flush;
+      if (nbshownfiles % 2 == 0)
+        {
+          std::cout << std::endl;
+          nl= true;
+        };
+    };
+} // end  rps_show_version_one_source_file
 
 void
 rps_show_version(void)
 {
   int nbfiles=0;
   int nbsubdirs=0;
-  for (auto pfiles=rps_files; *pfiles; pfiles++)
+  for (const char*const*pfiles=rps_files; *pfiles; pfiles++)
     nbfiles++;
   for (auto psubdirs=rps_subdirectories; *psubdirs; psubdirs++)
     nbsubdirs++;
@@ -704,8 +795,12 @@ rps_show_version(void)
             << " of email " << rps_building_user_email << std::endl
             << "See refpersys.org and code on github.com/RefPerSys/RefPerSys"
             << std::endl;
+  std::cout << "Compiled by " << rps_cxx_compiler_version << " as " << rps_cxx_compiler_realpath
+            << std::endl
+            << "with " << rps_cxx_compiler_flags
+            << std::endl;
   /////
-  rps_show_version_handwritten_cplusplus_files();
+  rps_show_version_handwritten_source_files();
   /////
   {
     char cwdbuf[rps_path_byte_size+4];
@@ -840,20 +935,55 @@ rps_check_mtime_files(void)
                     << " seconds than current executable " << exebuf
                     << ", so consider rebuilding with make");
     }
-  char makecmd [128];
-  memset (makecmd, 0, sizeof(makecmd));
-  if (snprintf(makecmd, sizeof(makecmd), "make -t -C %s -q objects", rps_topdirectory) < (int)sizeof(makecmd)-1)
+  //// run a make -t command to check that objects are up to date
+  {
+    char tempmakefileout[128];
+    memset (tempmakefileout, 0, sizeof(tempmakefileout));
+    snprintf(tempmakefileout, sizeof(tempmakefileout),
+             "/var/tmp/rpsmkchkmtim-%s-r%u-p%u",
+             rps_shortgitid,
+             (unsigned) Rps_Random::random_32u(),
+             (unsigned) getpid());
+    RPS_ASSERT(strlen(tempmakefileout) < sizeof(tempmakefileout)-4);
     {
-      int bad = system(makecmd);
-      if (bad)
-        RPS_WARNOUT("rps_check_mtime_files: " << makecmd
-                    << " failed with status# " << bad);
-      else
-        RPS_INFORMOUT("rps_check_mtime_files: did " << std::string(makecmd) << " successfully");
+      FILE* ftemp = fopen(tempmakefileout, "w");
+      if (!ftemp)
+        RPS_FATALOUT("failed to open temporary make output " << tempmakefileout);
+      fprintf(ftemp, "# postponed temporary make output %s for...\n"
+              "#... refpersys run %s from %s:%d\n",
+              tempmakefileout, rps_run_name.c_str(), __FILE__, __LINE__);
+      rps_postponed_remove_file(std::string{tempmakefileout});
+      {
+        char cwdbuf[256];
+        memset (cwdbuf, 0, sizeof(cwdbuf));
+        char*pwd = getcwd(cwdbuf, sizeof(cwdbuf));
+        if (pwd)
+          fprintf (ftemp, "# running in %s\n", pwd);
+      }
+      char makecmd [256];
+      memset (makecmd, 0, sizeof(makecmd));
+      if (snprintf(makecmd, sizeof(makecmd),
+                   "%s -C %s -q objects 2>&1 >> %s",
+                   rps_gnu_make, rps_topdirectory,
+                   tempmakefileout)
+          < (int)sizeof(makecmd)-1)
+        {
+          int bad = system(makecmd);
+          if (bad)
+            RPS_WARNOUT("rps_check_mtime_files: " << makecmd
+                        << " failed with status# " << bad);
+          else
+            RPS_INFORMOUT("rps_check_mtime_files: did " << std::string(makecmd) << " successfully");
+        }
+      else        // makecmd too big
+        RPS_FATAL("rps_check_mtime_files failed to construct makecmd in %s: %m",
+                  rps_topdirectory);
+      fprintf (ftemp, "successful %s\n", makecmd);
+      fprintf (ftemp, "#end of %s from %s:%d (%s)\n",
+               tempmakefileout, __FILE__, __LINE__, __FUNCTION__);
+      fclose (ftemp);
     }
-  else
-    RPS_FATAL("rps_check_mtime_files failed to construct makecmd in %s: %m",
-              rps_topdirectory);
+  } // end running make -t command
 } // end rps_check_mtime_files
 
 
@@ -1370,7 +1500,7 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
                          << rps_test_repl_string);
           rps_test_repl_string = arg;
           RPS_INFORMOUT("will test the REPL lexer on:" << rps_test_repl_string
-                        << std::endl << "... that is the " << rps_test_repl_string.size()
+                        << std::endl << "… that is the " << rps_test_repl_string.size()
                         << " bytes string " << Rps_QuotedC_String(rps_test_repl_string));
         }
     }
@@ -1495,7 +1625,7 @@ rps_parse1opt (int key, char *arg, struct argp_state *state)
           if (!arg || !arg[0])
             RPS_FATALOUT("program option --cplusplus-editor-after-load"
                          " without explicit editor,\n"
-                         "... and no $EDITOR environment variable");
+                         "… and no $EDITOR environment variable");
           if (!rps_cpluspluseditor_str.empty())
             RPS_FATALOUT("program option --cplusplus-editor-after-load"
                          " given twice with "
@@ -1666,21 +1796,21 @@ rps_fatal_stop_at (const char *filnam, int lin)
   static constexpr int skipfatal=2;
   assert(filnam != nullptr);
   assert (lin>=0);
-  char errbuf[80];
+  char errbuf[128];
   memset (errbuf, 0, sizeof(errbuf));
   char cwdbuf[rps_path_byte_size];
   memset (cwdbuf, 0, sizeof(cwdbuf));
   if (!getcwd(cwdbuf, sizeof(cwdbuf)) || cwdbuf[0] == (char)0)
     strcpy(cwdbuf, "./");
-  snprintf (errbuf, sizeof(errbuf), "FATAL STOP (%s:%d)", filnam, lin);
+  snprintf (errbuf, sizeof(errbuf)-1, "FATAL STOP (%s:%d)/%s", filnam, lin, rps_current_pthread_name().c_str());
   /* we always syslog.... */
   syslog(LOG_EMERG, "RefPerSys fatal stop (%s:%d) git %s,\n"
-         "... build %s pid %d on %s,\n"
-         "... elapsed %.3f, process %.3f sec in %s\n%s%s%s%s",
+         "… build %s pid %d on %s,\n"
+         "… elapsed %.3f, process %.3f sec in %s\n%s%s%s%s",
          filnam, lin, rps_shortgitid,
          rps_timestamp, (int)getpid(), rps_hostname(),
          rps_elapsed_real_time(), rps_process_cpu_time(), cwdbuf,
-         (rps_program_invocation?"... started as ":""),
+         (rps_program_invocation?"… started as ":""),
          (rps_program_invocation?:""),
          (rps_run_name.empty()?"":" run "),
          rps_run_name.c_str());
@@ -1697,12 +1827,13 @@ rps_fatal_stop_at (const char *filnam, int lin)
             " RefPerSys gitid %s,\n"
             "\t built timestamp %s,\n"
             "\t on host %s, md5sum %s,\n"
-            "\t elapsed %.3f, process %.3f sec in %s\n",
+            "\t elapsed %.3f, process %.3f sec in %s thread %s\n",
             ontty?RPS_TERMINAL_BOLD_ESCAPE:"",
             ontty?RPS_TERMINAL_BLINK_ESCAPE:"",
             ontty?RPS_TERMINAL_NORMAL_ESCAPE:"",
             rps_gitid, rps_timestamp, rps_hostname(), rps_md5sum,
-            rps_elapsed_real_time(), rps_process_cpu_time(), cwdbuf);
+            rps_elapsed_real_time(), rps_process_cpu_time(), cwdbuf,
+            rps_current_pthread_name().c_str());
   if (rps_debug_file && rps_debug_file != stderr && rps_debug_path[0])
     {
       fprintf(stderr, "*°* see debug output in %s\n", rps_debug_path);
@@ -1759,9 +1890,10 @@ rps_fatal_stop_at (const char *filnam, int lin)
           else
             outl << ' ' << Rps_SingleQuotedC_String(curarg);
         }
-      outl << std::endl << std::flush;
+      outl << std::endl << "DGBCNT#" << rps_debug_counter() << "(a)"
+           << std::flush;
       syslog(LOG_EMERG, "RefPerSys fatal from %s", outl.str().c_str());
-    }
+    } // end if syslog enabled
   else
     {
       auto backt= Rps_Backtracer(Rps_Backtracer::FullOut_Tag{},
@@ -1774,7 +1906,9 @@ rps_fatal_stop_at (const char *filnam, int lin)
       std::clog << "RefPerSys gitid " << rps_shortgitid << " built " << rps_timestamp;
       if (!rps_run_name.empty())
         std::clog << " run " << rps_run_name;
-      std::clog << " was started on " << rps_hostname() << " pid " << (int)getpid() << " as:" << std::endl;
+      std::clog << std::endl
+                << "… was started on " << rps_hostname()
+                << " pid " << (int)getpid() << " as:" << std::endl;
       for (int aix=0; aix<rps_argc; aix++)
         {
           const char*curarg = rps_argv[aix];
@@ -1789,10 +1923,17 @@ rps_fatal_stop_at (const char *filnam, int lin)
           else
             std::clog << ' ' << Rps_SingleQuotedC_String(curarg);
         }
+      std::clog << std::endl << "DGBCNT#" << rps_debug_counter() << "(b)"
+                << std::flush;
       std::clog << std::endl << std::flush;
-    }
+    } // end if syslog disabled
   fflush(nullptr);
+  RPS_POSSIBLE_BREAKPOINT();
   rps_schedule_files_postponed_removal();
+  fprintf(stderr, "RefPerSys (git %s run %s) fatal stop\n"
+          "… °aborting at %s:%d\n",
+          rps_shortgitid, rps_run_name.c_str(), filnam, lin);
+  fflush(stderr);
   abort();
 } // end rps_fatal_stop_at
 
@@ -1990,7 +2131,9 @@ rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argob)
      )
     {
       RPS_POSSIBLE_BREAKPOINT();
-      RPS_WARNOUT("cannot add core sacred root object as constant " << _f.obconst << " of class " << _f.obconst->get_class()
+      RPS_WARNOUT("cannot add core sacred root object as constant "
+                  << RPS_OBJECT_DISPLAY(_f.obconst)
+                  << " of class " << _f.obconst->get_class()
                   << " thread " << rps_current_pthread_name()
                   << std::endl
                   << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object")
@@ -2031,16 +2174,16 @@ rps_add_constant_object(Rps_CallFrame*callframe, const Rps_ObjectRef argob)
   RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst=" << _f.obconst
                 << " of class " << _f.obconst->get_class() << " space " << _f.obconst->get_space()
                 << std::endl
-                << "... oldfsetv=" << _f.oldsetv << " newsetv=" << _f.newsetv << " in " << _f.obsystem
+                << "… oldfsetv=" << _f.oldsetv << " newsetv=" << _f.newsetv << " in " << _f.obsystem
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object/ending"));
   RPS_POSSIBLE_BREAKPOINT();
   _f.xtrav = _f.obsystem->get_physical_attr(RPS_ROOT_OB(_2aNcYqKwdDR01zp0Xp));
   RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst=" << _f.obconst
                 << " of class " << _f.obconst->get_class() << " space " << _f.obconst->get_space()
                 << std::endl
-                << "... oldfsetv=" << _f.oldsetv
-                << std::endl << "... newsetv=" << _f.newsetv
-                << std::endl << "... xtrav=" << _f.xtrav << " " << ((_f.xtrav  == _f.newsetv)?"same":"different")
+                << "… oldfsetv=" << _f.oldsetv
+                << std::endl << "… newsetv=" << _f.newsetv
+                << std::endl << "… xtrav=" << _f.xtrav << " " << ((_f.xtrav  == _f.newsetv)?"same":"different")
                 << " in " << _f.obsystem
                 << RPS_FULL_BACKTRACE_HERE(1, "rps_add_constant_object/ending2"));
   RPS_DEBUG_LOG(REPL, "rps_add_constant_object obconst="
@@ -2165,13 +2308,15 @@ rps_set_debug_flag(const std::string &curlev)
   ///
   /* second X macro trick for processing several comma-separated debug flags, in all cases as else if branch  */
   ///
-#define Rps_SET_DEBUG(Opt)            \
-  else if (curlev == #Opt) {            \
-    bool alreadygiven = rps_debug_flags & (1 << RPS_DEBUG_##Opt); \
+#define Rps_SET_DEBUG(Opt)                            \
+  else if (curlev == #Opt) {                          \
+    bool alreadygiven = rps_debug_flags               \
+      & (1 << RPS_DEBUG_##Opt);                       \
     rps_debug_flags |= (1 << RPS_DEBUG_##Opt);        \
-    goodflag = true;              \
-    if (!alreadygiven)              \
-      RPS_INFORMOUT("setting debugging flag " << #Opt);  }
+    goodflag = true;                                  \
+    if (!alreadygiven)                                \
+      RPS_INFORMOUT("setting debugging flag "         \
+                    << #Opt);  }
   ///
   RPS_DEBUG_OPTIONS(Rps_SET_DEBUG);
 #undef Rps_SET_DEBUG

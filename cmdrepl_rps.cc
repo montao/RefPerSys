@@ -13,7 +13,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2021 - 2025 The Reflective Persistent System Team
+ *      © Copyright (C) 2021 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -66,6 +66,7 @@ rps_full_evaluate_repl_expr(Rps_CallFrame*callframe, Rps_Value exprarg, Rps_Obje
   RPS_ASSERT_CALLFRAME (callframe);
   RPS_ASSERT(envobarg);
   constexpr int maxloop=256;
+  int framdepth = callframe->call_frame_depth();
   unsigned startdbgflags = rps_debug_flags.load();
   static std::atomic<unsigned long> eval_repl_counter_;
   const unsigned long eval_number = 1+eval_repl_counter_.fetch_add(1);
@@ -134,7 +135,7 @@ rps_full_evaluate_repl_expr(Rps_CallFrame*callframe, Rps_Value exprarg, Rps_Obje
   RPS_DEBUG_LOG(REPL, "rps_full_evaluate_repl_expr#"
                 << eval_number << " *STARTEVAL*"
                 << " expr:" << _f.exprv
-                << " in env:" << _f.envob);
+                << " in env:" << _f.envob << " framdepth=" << framdepth);
   /// to check the above failure macro:
   if (!_f.envob || _f.envob->stored_type() != Rps_Type::Object)
     {
@@ -748,6 +749,63 @@ Rps_PayloadEnvironment::dump_json_content(Rps_Dumper*du, Json::Value&jv) const
 } // end Rps_PayloadEnvironment::dump_json_content
 
 void
+Rps_PayloadEnvironment::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  /// most of the code below is "temporarily" duplicated from
+  /// Rps_PayloadObjMap::output_payload in file morevalues_rps.cc
+  /// we hope to later (in 2025?) have this C++ code generated at dump time
+  RPS_ASSERT(depth <= maxdepth);
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> gudispob(*owner()->objmtxptr());
+  int nbobjmap = (int) get_obmap_size();
+  if (nbobjmap==0)
+    out << BOLD_esc << "-empty environment-" << NORM_esc;
+  else
+    out << BOLD_esc << "-environment of " << nbobjmap
+        << ((nbobjmap>1)?" entries":" entry");
+  Rps_Value dv = get_descr();
+  if (dv)
+    out << " described by " << NORM_esc << Rps_OutputValue(dv, depth, maxdepth) << std::endl;
+  else
+    out << " plain" << NORM_esc << std::endl;
+  std::vector<Rps_ObjectRef> attrvect(nbobjmap);
+  do_each_obmap_entry<std::vector<Rps_ObjectRef>&>(attrvect,
+      [&](std::vector<Rps_ObjectRef>&atvec,
+          Rps_ObjectRef atob,
+          [[unused]]Rps_Value, [[unused]]void*)
+  {
+    atvec.push_back(atob);
+    return false;
+  });
+  rps_sort_object_vector_for_display(attrvect);
+  for (int ix=0; ix<(int)nbobjmap; ix++)
+    {
+      const Rps_ObjectRef curattr = attrvect[ix];
+      const Rps_Value curval = get_obmap(curattr);
+      out << BOLD_esc << "*"
+          << NORM_esc << curattr << ": "
+          << Rps_OutputValue(curval, depth, maxdepth)
+          << std::endl;
+    };
+  Rps_ObjectRef parenvob = get_parent_environment();
+  if (!parenvob)
+    out << BOLD_esc << "- no parent env -" << NORM_esc
+        << std::endl;
+  else
+    out << BOLD_esc << "- parent env: " << NORM_esc;
+  out << parenvob << BOLD_esc << "-" << NORM_esc << std::endl;
+} // end Rps_PayloadEnvironment::output_payload
+
+
+
+void
 rpsldpy_environment (Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
 {
   RPS_ASSERT(obz != nullptr);
@@ -925,14 +983,16 @@ rpsapply_61pgHb5KRq600RLnKD(Rps_CallFrame*callerframe, // REPL dump command
       if (dirh)
         {
           closedir(dirh);
-          RPS_DEBUG_LOG(CMD, "REPL command dumping into existing dir '" << Rps_Cjson_String (dirstr) << "' callcnt#" << callcnt);
+          RPS_DEBUG_LOG(CMD, "REPL command dumping into existing dir '"
+                        << Rps_Cjson_String (dirstr) << "' callcnt#" << callcnt);
           rps_dump_into(dirstr.c_str(), &_);
           dumpdir = dirstr;
           dumped = true;
         }
       else if (!mkdir(dirstr.c_str(), 0750))
         {
-          RPS_DEBUG_LOG(CMD, "REPL command dumping into fresh dir '" << Rps_Cjson_String (dirstr) << "' callcnt#" << callcnt);
+          RPS_DEBUG_LOG(CMD, "REPL command dumping into fresh dir '"
+                        << Rps_Cjson_String (dirstr) << "' callcnt#" << callcnt);
           rps_dump_into(dirstr.c_str(), &_);
           dumpdir = dirstr;
           dumped = true;
@@ -942,11 +1002,13 @@ rpsapply_61pgHb5KRq600RLnKD(Rps_CallFrame*callerframe, // REPL dump command
         // see https://man7.org/linux/man-pages/man3/wordexp.3.html
         RPS_WARNOUT("REPL command dump unimplemented into '" << dirstr << "' callcnt#" << callcnt);
     }
-  RPS_DEBUG_LOG(CMD, "REPL command dump dumped= " << (dumped?"true":"false") << " dumpdir=" << dumpdir << " callcnt#" << callcnt<< " nextlexob:" << _f.nextlexval);
+  RPS_DEBUG_LOG(CMD, "REPL command dump dumped= " << (dumped?"true":"false")
+                << " dumpdir=" << dumpdir << " callcnt#" << callcnt<< " nextlexob:" << _f.nextlexval);
   if (dumped)
     return {Rps_StringValue(dumpdir),nullptr};
   else
-    RPS_WARNOUT("non-dumped REPL token for command dump - dumpdir=" << dumpdir << " callcnt#" << callcnt<< " nextlexval" << _f.nextlexval);
+    RPS_WARNOUT("non-dumped REPL token for command dump - dumpdir=" << dumpdir
+                << " callcnt#" << callcnt<< " nextlexval" << _f.nextlexval);
 #warning incomplete rpsapply_61pgHb5KRq600RLnKD for REPL command dump
   RPS_WARNOUT("incomplete rpsapply_61pgHb5KRq600RLnKD for REPL command dump from " << std::endl
               << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_61pgHb5KRq600RLnKD for REPL command dump") << std::endl
@@ -1018,14 +1080,11 @@ rps_sort_object_vector_for_display(std::vector<Rps_ObjectRef>&vectobr)
 void
 Rps_Object_Display::output_display(std::ostream&out) const
 {
+  char obidbuf[32];
+  memset (obidbuf, 0, sizeof(obidbuf));
 #warning incomplete Rps_Object_Display::output_display should be moved to objects_rps.cc
   if (!_dispfile)
     return;
-  if (!_dispobref)
-    {
-      out << "__ (*" << _dispfile << ":" << _displine << "*)" << std::endl;
-      return;
-    };
   bool ontty =
     (&out == &std::cout)?isatty(STDOUT_FILENO)
     :(&out == &std::cerr)?isatty(STDERR_FILENO)
@@ -1034,17 +1093,39 @@ Rps_Object_Display::output_display(std::ostream&out) const
     ontty = false;
   const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
   const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  /*** FIXME:
+   *
+   * in practice we may need to define a special debugging output
+   * stream, since in commit 31e7ab2efcce973 (may 2025) the ontty
+   * above is always false because RPS_DEBUGNL_LOG_AT and RPS_DEBUG_AT
+   * macros are declaring a local std::ostringstream...
+   ***/
+  RPS_POSSIBLE_BREAKPOINT();
+  if (!_dispobref)
+    {
+      out << BOLD_esc << "__" << NORM_esc
+          << " (*" << _dispfile << ":" << _displine << "*)" << std::endl;
+      return;
+    };
   /// We lock the displayed object to avoid other threads modifying it
   /// during the display.
   std::lock_guard<std::recursive_mutex> gudispob(*_dispobref->objmtxptr());
+  _dispobref->oid().to_cbuf24(obidbuf);
   out  << std::endl
        << BOLD_esc
-       << "¤¤ showing object " << _dispobref
+       << "{¤¤ object " << _dispobref
        << NORM_esc
        << std::endl << "  of class "
        << _dispobref->get_class()
-       << std::endl
-       << " in space " << _dispobref->get_space() << std::endl;
+       << std::endl;
+  {
+    Rps_ObjectRef obspace =  _dispobref->get_space();
+    if (!obspace.is_empty())
+      out <<  "¤ in space " << _dispobref->get_space() << std::endl;
+    else
+      out << BOLD_esc << "¤ temporary" << NORM_esc << " space"
+          << std::endl;
+  };
   double obmtim = _dispobref->get_mtime();
   {
     char mtimbuf[64];
@@ -1144,11 +1225,17 @@ Rps_Object_Display::output_display(std::ostream&out) const
   if (!payl)
     {
       out << BOLD_esc << "* no payload *" << NORM_esc << std::endl;
-      return;
     }
-  out << BOLD_esc << "* " << payl->payload_type_name() << " payload *"
-      << NORM_esc << std::endl;
-  payl->output_payload(out, _dispdepth, disp_max_depth);
+  else
+    {
+      out << BOLD_esc << "* " << payl->payload_type_name() << " payload *"
+          << NORM_esc << std::endl;
+      payl->output_payload(out, _dispdepth, disp_max_depth);
+    };
+  char oidpref[16];
+  memset (oidpref, 0, sizeof(oidpref));
+  memcpy (oidpref, obidbuf, sizeof(oidpref)/2);
+  out << " " << BOLD_esc << "|-" << oidpref << "¤¤}" << NORM_esc << std::endl;
 } // end Rps_Object_Display::output_display
 
 
@@ -1197,7 +1284,7 @@ void rps_show_object_for_repl(Rps_CallFrame*callerframe,
       (*pout)
           << std::endl << std::endl << "================================" << std::endl
           << (ontty?RPS_TERMINAL_BOLD_ESCAPE:"")
-          << "¤¤ showing object " << _f.shownob
+          << "¤! object " << _f.shownob
           << (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"")
           << std::endl << "  of class "
           << _f.shownob->get_class()
@@ -1428,7 +1515,7 @@ rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe, // REPL command show expr
     RPS_ASSERT (tksrc != nullptr);
     showpos = tksrc->position_str();
     RPS_DEBUG_LOG(REPL, "REPL command show°_7WsQyJK6 tksrc:" << *tksrc << std::endl
-                  << "... before parse_expression pos:" << showpos
+                  << "… before parse_expression pos:" << showpos
                   << " curcptr:" << Rps_QuotedC_String(tksrc->curcptr())
                   << " token_deq:" << tksrc->token_dequeue());
     RPS_DEBUG_LOG(CMD, "REPL command show lextokv=" << _f.lextokv << " framedepth:"
@@ -1447,14 +1534,14 @@ rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe, // REPL command show expr
         tksrc->append_back_new_token(&_, _f.lextokv);
         RPS_DEBUG_LOG(REPL, "rpsapply_7WsQyJK6lty02uz5KT for REPL command show tksrc becomes " << (*tksrc)
                       << std::endl
-                      << "... curcptr:" << Rps_QuotedC_String(tksrc->curcptr())
+                      << "… curcptr:" << Rps_QuotedC_String(tksrc->curcptr())
                       << " token_deq:" << tksrc->token_dequeue()
                       << RPS_FULL_BACKTRACE_HERE(1, "rpsapply_7WsQyJK6lty02uz5KT for REPL command show"));
       }
     RPS_DEBUG_LOG(REPL, "REPL command show°_7WsQyJK6/before pars.expr. tksrc:" << (*tksrc) << " replcmdob:" << _f.replcmdob << std::endl
                   << " lextokv:" << _f.lextokv
                   << std::endl << RPS_FULL_BACKTRACE_HERE(1, "%command show°_7WsQyJK6lty02uz5KT/before parsexp")
-                  << std::endl << ".... before parse_expression token_deq:"
+                  << std::endl << "… before parse_expression token_deq:"
                   << tksrc->token_dequeue()
                   << " curcptr:" << Rps_QuotedC_String(tksrc->curcptr()) << std::endl);
     bool okparsexp = false;
@@ -1464,7 +1551,7 @@ rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe, // REPL command show expr
         RPS_WARNOUT("command show°_7WsQyJK6 failed to parse expression in " << (*tksrc)
                     << std::endl
                     << " replcmdob:" << _f.replcmdob << std::endl
-                    << "... token_deq:" << tksrc->token_dequeue()
+                    << "… token_deq:" << tksrc->token_dequeue()
                     << " curcptr:" << Rps_QuotedC_String(tksrc->curcptr())
                     << " lextokv:" << _f.lextokv << " showv:" << _f.showv
                     << std::endl
@@ -1482,8 +1569,8 @@ rpsapply_7WsQyJK6lty02uz5KT(Rps_CallFrame*callerframe, // REPL command show expr
     RPS_DEBUG_LOG(CMD, "REPL command show lextokv=" << _f.lextokv << " framedepth:"<< _.call_frame_depth()
                   << " after successful parse_expression showv=" << _f.showv);
     RPS_DEBUG_LOG(REPL, "REPL command show°_7WsQyJK6/after pars.expr. tksrc:" << (*tksrc) << std::endl
-                  << "... replcmdob:" << _f.replcmdob << std::endl
-                  << "... token_deq:" << tksrc->token_dequeue()
+                  << "… replcmdob:" << _f.replcmdob << std::endl
+                  << "… token_deq:" << tksrc->token_dequeue()
                   << " curcptr:" << Rps_QuotedC_String(tksrc->curcptr())
                   << " lextokv:" << _f.lextokv << " should evaluate showv:" << _f.showv
                   << " in evalenvob:" << _f.evalenvob

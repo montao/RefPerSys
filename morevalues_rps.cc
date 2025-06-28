@@ -12,7 +12,7 @@
  *      Abhishek Chakravarti <abhishek@taranjali.org>
  *      Nimesh Neema <nimeshneema@gmail.com>
  *
- *      © Copyright 2020 - 2024 The Reflective Persistent System Team
+ *      © Copyright (C) 2020 - 2025 The Reflective Persistent System Team
  *      team@refpersys.org & http://refpersys.org/
  *
  * License:
@@ -518,16 +518,19 @@ Rps_DequVal::output(std::ostream&out, unsigned depth, unsigned maxdepth) const
         }
       else // siz > 0
         {
-          if (dqu_srcfil && dqu_srcfil[0] && dqu_srclin>0)
-            out << "°deqval(<@" << dqu_srcfil << ":" << dqu_srclin << "⁖";
+          if (dqu_srcfil && dqu_srclin>0 && dqu_srcfil[0])
+            out << "°deqval" << "ℓ" //U+2113 SCRIPT SMALL L
+                << siz
+                << "(<@" << dqu_srcfil << ":" << dqu_srclin << "⁖";
           else
-
-            out << "°deqval(<";
+            out << "°deqval" << "ℓ" //U+2113 SCRIPT SMALL L
+                << siz
+                << "(<";
           int cnt = 0;
           for (const Rps_Value& curval: *this)
             {
               if (cnt > 0)
-                out << " ";
+                out << std::endl << " ";
               {
                 char cntbuf[16];
                 memset (cntbuf, 0, sizeof(cntbuf));
@@ -708,6 +711,48 @@ Rps_PayloadObjMap::put_obmap(Rps_ObjectRef obkey, Rps_Value val)
   RPS_ASSERT(obkey);
   obm_map.insert({obkey,val});
 } // end Rps_PayloadObjMap::put_obmap
+
+void
+Rps_PayloadObjMap::output_payload(std::ostream&out, unsigned depth, unsigned maxdepth) const
+{
+  /// most of the code below is duplicated in
+  /// Rps_PayloadEnvironment::output_payload in file cmdrepl_rps.cc
+  /// we hope to later (in 2025?) have this C++ code generated at dump time
+  RPS_ASSERT(depth <= maxdepth);
+  bool ontty =
+    (&out == &std::cout)?isatty(STDOUT_FILENO)
+    :(&out == &std::cerr)?isatty(STDERR_FILENO)
+    :false;
+  if (rps_without_terminal_escape)
+    ontty = false;
+  const char* BOLD_esc = (ontty?RPS_TERMINAL_BOLD_ESCAPE:"");
+  const char* NORM_esc = (ontty?RPS_TERMINAL_NORMAL_ESCAPE:"");
+  std::lock_guard<std::recursive_mutex> gudispob(*owner()->objmtxptr());
+  int nbobjmap = (int) obm_map.size();
+  if (nbobjmap==0)
+    out << BOLD_esc << "-empty object map-" << NORM_esc;
+  else
+    out << BOLD_esc << "-object map of " << nbobjmap << ((nbobjmap>1)?" entries":" entry");
+  Rps_Value dv = obm_descr;
+  if (dv)
+    out << " described by " << NORM_esc << Rps_OutputValue(dv, depth, maxdepth) << std::endl;
+  else
+    out << " plain" << NORM_esc << std::endl;
+  std::vector<Rps_ObjectRef> attrvect(nbobjmap);
+  for (auto it : obm_map)
+    attrvect.push_back(it.first);
+  rps_sort_object_vector_for_display(attrvect);
+  for (int ix=0; ix<(int)nbobjmap; ix++)
+    {
+      const Rps_ObjectRef curattr = attrvect[ix];
+      const Rps_Value curval = (obm_map.at(curattr));
+      out << BOLD_esc << "*"
+          << NORM_esc << curattr << ": "
+          << Rps_OutputValue(curval, depth, maxdepth)
+          << std::endl;
+    };
+#warning Rps_PayloadObjMap::output_payload incomplete
+} // end Rps_PayloadObjMap::output_payload
 
 void
 rpsldpy_objmap(Rps_ObjectZone*obz, Rps_Loader*ld, const Json::Value& jv, Rps_Id spacid, unsigned lineno)
